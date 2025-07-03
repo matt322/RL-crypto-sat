@@ -1,0 +1,5 @@
+solver options
+-pass activity file
+-run for n decisions
+-pass learnt file to write to
+-pass solver state file - what must be included?

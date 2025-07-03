@@ -23,8 +23,10 @@ LFLAGS    ?= -Wall -lpthread
 
 COPTIMIZE ?= -O3
 
-CFLAGS    += -I$(MROOT) -D __STDC_LIMIT_MACROS -D __STDC_FORMAT_MACROS
-LFLAGS    += -lz
+#INCLUDES := $(shell python3 -m pybind11 --includes)
+
+CFLAGS    += -I$(MROOT) -undefined dynamic_lookup -D __STDC_LIMIT_MACROS -D __STDC_FORMAT_MACROS
+LFLAGS    += -lz 
 
 .PHONY : s p d r rs clean 
 
