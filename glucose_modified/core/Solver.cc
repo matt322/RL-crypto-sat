@@ -48,6 +48,8 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
  **************************************************************************************************/
 
 #include <math.h>
+#include <iostream>
+#include <sstream>
 
 #include "utils/System.h"
 #include "mtl/Sort.h"
@@ -128,7 +130,8 @@ Solver::Solver() :
 
 // Parameters (user settable):
 //
-verbosity(0)
+decision_limit(0)
+, verbosity(0)
 , showModel(0)
 , K(opt_K)
 , R(opt_R)
@@ -288,6 +291,10 @@ Solver::Solver(const Solver &s) :
 , nbSatCalls(s.nbSatCalls)
 , nbUnsatCalls(s.nbUnsatCalls)
 , performLCM(s.performLCM)
+
+//MODIFICATIONS
+
+, decision_limit(s.decision_limit)
 {
     // Copy clauses.
     s.ca.copyTo(ca);
@@ -1451,6 +1458,7 @@ lbool Solver::search(int nof_conflicts) {
     }
 
 
+
     for(; ;) {
         if(decisionLevel() == 0) { // We import clauses FIXME: ensure that we will import clauses enventually (restart after some point)
             parallelImportUnaryClauses();
@@ -1559,6 +1567,14 @@ lbool Solver::search(int nof_conflicts) {
 
 
         } else {
+           // MODIFICATION decision limit
+            if (decision_limit != 0 && decisions >= decision_limit) {
+                writeLearntClauses();
+                waitForActivityScores();
+                return l_Undef;
+            }
+
+
             // Our dynamic restart, see the SAT09 competition compagnion paper
             if((luby_restart && nof_conflicts <= conflictC) ||
                (!luby_restart && (lbdQueue.isvalid() && ((lbdQueue.getavg() * K) > (sumLBD / conflictsRestarts))))) {
@@ -1631,9 +1647,6 @@ lbool Solver::search(int nof_conflicts) {
             uncheckedEnqueue(next);
         }
     
-        if (conflicts % 50000 == 0) {
-            writeLearntClauses(learnt_clause_file);
-        }
     
     }
 }
@@ -1762,7 +1775,6 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
         printf("c |       NB   Blocked  Avg Cfc |    Vars  Clauses Literals |   Red   Learnts    LBD2  Removed |          |\n");
         printf("c =========================================================================================================\n");
     }
-
     // Search:
     int curr_restarts = 0;
     while(status == l_Undef) {
@@ -1772,9 +1784,11 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
         if(!withinBudget()) break;
         curr_restarts++;
     }
+    
 
-    if(!incremental && verbosity >= 1)
+    if(!incremental && verbosity >= 1) {
         printf("c =========================================================================================================\n");
+    }
 
     if(certifiedUNSAT) { // Want certified output
         if(status == l_False) {
@@ -2001,22 +2015,35 @@ void Solver::parallelImportClauseDuringConflictAnalysis(Clause &, CRef ) {
 //=================================================================================================
 //MODIFICATIONS
 
-void Solver::writeLearntClauses(const char* filename) {
-    FILE* file = fopen(filename, "w");
-    if (file == NULL) {
-        printf("c WARNING! Could not open file: %s\n", filename);
-        return;
-    }
-
+void Solver::writeLearntClauses() {
+    std::cout << "m learnt start\n";
     for (int i = 0; i < learnts.size(); i++) {
         const Clause& c = ca[learnts[i]];
         if (c.mark() == 0) { // Only write active clauses
+            std::cout << 'l';
             for (int j = 0; j < c.size(); j++) {
-                fprintf(file, "%d ", (var(c[j]) + 1) * (-2 * sign(c[j]) + 1));
+                std::cout << " " << (var(c[j]) + 1) * (-2 * sign(c[j]) + 1);
             }
-            fprintf(file, "0\n");
+            std::cout << "\n";
         }
     }
+    std::cout << "m done\n";
+    std::cout.flush();
+}
 
-    fclose(file);
+void Solver::waitForActivityScores() {
+    std::cout << "m activity start" << std::endl;
+    std::string line;
+    while (getline(std::cin, line)) {
+        if (line.empty()) continue;
+        if (line == "m done") break;
+        int idx;
+        double val;
+        std::istringstream iss(line);
+        if (!(iss >> idx >> val)) {
+            continue;
+        }
+        if (idx >= activity.size()) throw std::runtime_error("Invalid index in activity scores: " + std::to_string(idx));
+        activity[idx] = val;
+    }
 }

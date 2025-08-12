@@ -7,11 +7,11 @@ def autoencoder(n=3968, dim=8):
     embeddings = nn.Linear(n, dim, bias=False)
     model = nn.Sequential(
         embeddings,
-        nn.Linear(dim, 128),
+        nn.Linear(dim, 32),
         nn.ReLU(),
-        nn.Linear(128, 128),
+        nn.Linear(32, 32),
         nn.ReLU(),
-        nn.Linear(128, n)
+        nn.Linear(32, n)
     )
     
     def onehot(i):
@@ -24,7 +24,7 @@ def autoencoder(n=3968, dim=8):
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     criterion = nn.CrossEntropyLoss()
-    for epoch in range(500):
+    for epoch in range(1000):
         data = np.array([onehot(i) for i in range(n)])
         np.random.shuffle(data)
         data = torch.tensor(data, dtype=torch.float32)

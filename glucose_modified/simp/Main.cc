@@ -142,10 +142,14 @@ int main(int argc, char** argv)
          StringOption  opt_certified_file      (_certified, "certified-output",    "Certified UNSAT output file", "NULL");
          BoolOption    opt_vbyte             (_certified, "vbyte",    "Emit proof in variable-byte encoding", false);
 
+        IntOption opt_decisions("MAIN", "decisions", "Limit the number of decisions (0 for no limit)", 0, IntRange(0, INT32_MAX));
+
         parseOptions(argc, argv, true);
 
         SimpSolver  S;
         double      initial_time = cpuTime();
+
+        S.decision_limit = opt_decisions;
 
         S.parsing = 1;
         S.use_simplification = pre;

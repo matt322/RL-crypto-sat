@@ -276,7 +276,9 @@ public:
 
 
     //MODIFICATIONS
-    void writeLearntClauses(const char* filename); 
+    void writeLearntClauses(); 
+    void waitForActivityScores();
+    int decision_limit; 
 
 
 
