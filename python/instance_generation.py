@@ -2,15 +2,15 @@ import random
 import os
 import shutil
 import subprocess
-import hashlib
 
 class Instance:
-    def __init__(self, rounds=21, solver_path="glucose_modified/simp/glucose"):
+    def __init__(self, rounds=21, solver_path="glucose_modified/simp/glucose", seed=None):
         self.solver_path = solver_path
         self.cnf_path = f"cnf/sha1_{rounds}round.cnf"
         self.rounds = rounds
         self.nvars, self.nclauses = self.get_varcount(self.cnf_path)
         self.instancefile = f"cnf/instance_{self.rounds}_rounds_{len(os.listdir("cnf"))}.cnf"
+        random.seed(seed)
 
     def __del__(self):
         try:
@@ -75,6 +75,7 @@ class Instance:
         return self.instancefile, soln, nvars, nclauses
 
 if __name__ == "__main__":
-    i = Instance()
-    i.generate(0.0)
+    i = Instance(seed=42, rounds=21)
+    i.generate(0.01)[1]
     shutil.copy(i.instancefile, "cnf/preimage_test.cnf")
+    subprocess.run(f"{i.solver_path} cnf/preimage_test.cnf -certified-output=cnf/proof.txt", text=True, shell=True)

@@ -50,6 +50,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <math.h>
 #include <iostream>
 #include <sstream>
+#include <chrono>
 
 #include "utils/System.h"
 #include "mtl/Sort.h"
@@ -1568,9 +1569,15 @@ lbool Solver::search(int nof_conflicts) {
 
         } else {
            // MODIFICATION decision limit
-            if (decision_limit != 0 && decisions >= decision_limit) {
-                writeLearntClauses();
+            if (decision_limit != 0 && decisions > 0 && decisions % decision_limit == 0 ) {
+                auto start = std::chrono::high_resolution_clock::now();
+                decisions++; // to avoid being called again at next iteration
+                writeClauses(true);
+                auto printTime = std::chrono::high_resolution_clock::now();
+                std::cout << "c clause write time: " << std::chrono::duration_cast<std::chrono::milliseconds>(printTime - start).count() << "ms" << std::endl;
                 waitForActivityScores();
+                auto scoresTime = std::chrono::high_resolution_clock::now();
+                std::cout << "c activity score time: " << std::chrono::duration_cast<std::chrono::milliseconds>(scoresTime - printTime).count() << "ms" << std::endl;
                 return l_Undef;
             }
 
@@ -2015,10 +2022,12 @@ void Solver::parallelImportClauseDuringConflictAnalysis(Clause &, CRef ) {
 //=================================================================================================
 //MODIFICATIONS
 
-void Solver::writeLearntClauses() {
-    std::cout << "m learnt start\n";
-    for (int i = 0; i < learnts.size(); i++) {
-        const Clause& c = ca[learnts[i]];
+void Solver::writeClauses(bool onlyLearnts) {
+    vec<CRef>& outputClauses = onlyLearnts ? learnts : clauses;
+    std::string clause_type = onlyLearnts ? "learnt" : "fixed";
+    std::cout << "m " << clause_type << " start\n";
+    for (int i = 0; i < outputClauses.size(); i++) {
+        const Clause& c = ca[outputClauses[i]];
         if (c.mark() == 0) { // Only write active clauses
             std::cout << 'l';
             for (int j = 0; j < c.size(); j++) {
@@ -2027,8 +2036,7 @@ void Solver::writeLearntClauses() {
             std::cout << "\n";
         }
     }
-    std::cout << "m done\n";
-    std::cout.flush();
+    std::cout << "m " << clause_type << " done\n" << std::flush;
 }
 
 void Solver::waitForActivityScores() {

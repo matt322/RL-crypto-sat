@@ -276,7 +276,7 @@ public:
 
 
     //MODIFICATIONS
-    void writeLearntClauses(); 
+    void writeClauses(bool onlyLearnts); 
     void waitForActivityScores();
     int decision_limit; 
 

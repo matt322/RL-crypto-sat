@@ -1,7 +1,7 @@
 import subprocess
-import threading
-import os
+import time
 from instance_generation import Instance
+import shutil
 
 #init solver, will write learnts to stdout and take activity scores as input
 #immediately yield non-learnt clauses (after simplification)
@@ -11,23 +11,31 @@ from instance_generation import Instance
 
 
 class SolverController:
-    def __init__(self, bufsize: int = 65536, solver_path="glucose_modified/simp/glucose"):
+    def __init__(self, solver_path="glucose_modified/simp/glucose", verb=0):
         self.solver_path = solver_path
-        self.bufsize = int(bufsize)
         self.proc = None
         self._stop = False
-        self.decisions = 50000
-
-    def start(self, cnf_path):
+        self.verb = verb
+        
+    def start(self, cnf_path, decisions_per_callback=200000, timeout_secs=1000):
         self.proc = subprocess.Popen(
-            [self.solver_path, cnf_path, "-model", f"-decisions={self.decisions}", "-verb=0"],
+            [self.solver_path, cnf_path, "-model", f"-decisions={decisions_per_callback}", "-verb=0", "-certified", "-certified-output=cnf/proof.txt"],
             stdin=subprocess.PIPE,      
             stdout=subprocess.PIPE,     
-            stderr=subprocess.DEVNULL,  
-            bufsize=self.bufsize        
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1
         )
         if self.proc.stdin is None or self.proc.stdout is None:
             raise RuntimeError("Failed to open pipes to subprocess")
+        self.fixed_clauses = []
+        self.learnt_clauses = []
+        self.reading_learnts = False
+        self.total_learnts = 0
+        self.total_fixed = 0
+        self.start_time = time.time()
+        self.timeout_secs = timeout_secs
+
 
     def stop(self):
         self._stop = True
@@ -37,14 +45,14 @@ class SolverController:
             except Exception:
                 pass
 
-    def run_loop(self, callback):
+    def step(self, callback):
         """
-        Main loop:
         - read chunks from solver stdout (binary)
         - accumulate lines, parse only lines starting with b'l' or b'm'
         - when 'm done' seen, invoke callback(clauses)
         - write callback result (bytes/str) to solver stdin, flush
         - repeat until solver exits or stop() called
+        returns: (learnt_clauses, fixed_clauses, done, model, time since start)
         """
         if self.proc is None:
             raise RuntimeError("Process not started; call start() first")
@@ -52,109 +60,83 @@ class SolverController:
         reader = self.proc.stdout
         writer = self.proc.stdin
 
-        # byte buffer holding partial data between reads
-        buf = bytearray()
-        clauses = []  # current batch of clauses: list of list[int]
+        self.learnt_clauses = []
+        self.total_learnts = 0
 
-        try:
-            while not self._stop:
-                chunk = reader.read(self.bufsize)
-                if not chunk:
-                    # EOF (process exited) — break loop after flushing outstanding clauses if any
-                    if clauses:
-                        self._handle_batch(callback, clauses, writer)
-                        clauses = []
-                    break
+        if time.time() - self.start_time > self.timeout_secs:
+            if self.verb > 0:
+                print("Timeout reached, stopping solver")
+            self.stop()
+            return self.learnt_clauses, self.fixed_clauses, True, None, time.time() - self.start_time
 
-                buf.extend(chunk)
-                # process all complete lines
-                while True:
-                    nl_idx = buf.find(b'\n')
-                    if nl_idx == -1:
-                        break
-                    line = bytes(buf[:nl_idx])  # copy out the line (without newline)
-                    del buf[:nl_idx + 1]       # remove processed line + newline
+        for line in reader:
+            line = line.strip()
+            if line.startswith("m "):
+                match line:
+                    case "m learnt done":
+                        if self.verb > 0:
+                            print(f"Read {self.total_learnts} learnt clauses")
+                    case "m learnt start":
+                        self.total_learnts = 0
+                        self.reading_learnts = True
+                    case "m fixed done":
+                        if self.verb > 0:
+                            print(f"Read {self.total_fixed} fixed clauses")
+                    case "m fixed start":
+                        pass
+                    case "m activity start":
+                        if self.verb > 0:
+                            print("Calculating activities...")
+                        self._handle_batch(callback, writer)
+                        return self.learnt_clauses, self.fixed_clauses, False, None, time.time() - self.start_time
 
-                    if not line:
-                        continue
+                    case _:
+                        if self.verb > 0:
+                            print(f"Solver message: {line[2:]}")
 
-                    # check first byte to avoid a full decode for irrelevant lines
-                    first = line[:1]
-                    if first == b'l':
-                        # expected format: b"l x1 x2 ... xn"
-                        # skip leading 'l' and optional space
-                        rest = line[1:].lstrip()
-                        if rest:
-                            # parse ints; could be negative literals
-                            try:
-                                # decode once per interesting line
-                                lits = [int(x) for x in rest.split()]
-                                clauses.append(lits)
-                            except ValueError:
-                                # ignore malformatted clause lines
-                                continue
-                        else:
-                            # empty clause
-                            clauses.append([])
-                    elif first == b'm':
-                        # check for "m done"
-                        # either "m done" or other m-commands -- only act on "m done"
-                        token = line[1:].lstrip()
-                        if token == b'done':
-                            # end of batch: send to callback
-                            if clauses:
-                                self._handle_batch(callback, clauses, writer)
-                                clauses = []
-                            else:
-                                # empty batch: still call callback with empty list if desired
-                                self._handle_batch(callback, [], writer)
-                        else:
-                            # ignore other m- lines
-                            continue
-                    else:
-                        # ignore other lines
-                        continue
 
-            # wait for process to end (if not already)
-            if self.proc.poll() is None:
-                self.proc.wait()
-        finally:
-            # clean up
-            try:
-                if self.proc and self.proc.stdin:
-                    self.proc.stdin.close()
-            except Exception:
-                pass
+            elif line.startswith("l "):
+                clause = [int(x) for x in line.split()[1:]]
+                if self.reading_learnts:
+                    self.learnt_clauses.append(clause)
+                    self.total_learnts += 1
+                else:
+                    self.fixed_clauses.append(clause)
+                    self.total_fixed += 1
+            
+            elif line.startswith("v "):
+                if self.verb > 0:
+                    print("solved")
+                self.stop()
+                return self.learnt_clauses, self.fixed_clauses, True, line.split(" ")[1:], time.time() - self.start_time
 
-    def _handle_batch(self, callback, clauses, writer):
+            else:
+                print(line)
+                    
+          
+    def _handle_batch(self, callback, writer):
         """
-        Call the callback and write its result to writer (stdin) followed by newline (if not present).
+        Call the callback and write the activity scores to solver stdin as index value pairs
         """
-        try:
-            resp = callback(clauses)
-        except Exception as e:
-            # callback error: write an error marker or just ignore
-            # for now, write nothing and return
-            return
+        resp = callback(self.fixed_clauses, self.learnt_clauses)
+        for i in resp:
+            writer.write(i + "\n")
+        writer.write("m done\n")
+        writer.flush()
 
-        if resp is None:
-            return
+if __name__ == "__main__":
+    inst = Instance(seed=42, rounds=21)
+    solver = SolverController()
+    cnf_path, true_model, _, _ = inst.generate(p=0.01)
+    shutil.copy(cnf_path, "cnf/last_instance.cnf")
+    def callback(a, b):
+        return [f"{i} {0.0}" for i in range(inst.nvars)]
+    solver.start(cnf_path, 10000)
+    while not solver._stop:
+        learnts, fixed, done, model, runtime = solver.step(callback)
+    for i in zip(model, true_model):
+        if int(i[0]) != i[1]:
+            print(i)
+    
+    
 
-        if isinstance(resp, str):
-            out = resp.encode('utf-8')
-        elif isinstance(resp, bytes):
-            out = resp
-        else:
-            # try to convert to string
-            out = str(resp).encode('utf-8')
-
-        # ensure a newline terminator (solver expects lines)
-        if not out.endswith(b'\n'):
-            out += b'\n'
-
-        try:
-            writer.write(out)
-            writer.flush()
-        except BrokenPipeError:
-            # solver process closed stdin
-            pass
