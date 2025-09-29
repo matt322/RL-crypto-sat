@@ -17,9 +17,12 @@ class SolverController:
         self._stop = False
         self.verb = verb
         
-    def start(self, cnf_path, decisions_per_callback=200000, timeout_secs=1000):
+    def start(self, cnf_inst, decisions_per_callback=200000, timeout_secs=1000, args = []):
+        self.inst = cnf_inst
+        solverargs = [self.solver_path, cnf_inst[0], "-model", f"-decisions={decisions_per_callback}", "-verb=0"]
+        solverargs.extend(args)
         self.proc = subprocess.Popen(
-            [self.solver_path, cnf_path, "-model", f"-decisions={decisions_per_callback}", "-verb=0", "-certified", "-certified-output=cnf/proof.txt"],
+            solverargs,
             stdin=subprocess.PIPE,      
             stdout=subprocess.PIPE,     
             stderr=subprocess.DEVNULL,
@@ -36,6 +39,22 @@ class SolverController:
         self.start_time = time.time()
         self.timeout_secs = timeout_secs
 
+        reader = self.proc.stdout
+        for line in reader:
+            line = line.strip()
+            if line.startswith("l "):
+                clause = [int(x) for x in line.split()[1:]]
+                self.fixed_clauses.append(clause)
+                self.total_fixed += 1
+            elif line.startswith("m "):
+                if line == "m fixed done":
+                    if self.verb > 0:
+                        print(f"Read {self.total_fixed} fixed clauses")
+                    break
+        return self.fixed_clauses
+                
+
+        
 
     def stop(self):
         self._stop = True
@@ -45,7 +64,10 @@ class SolverController:
             except Exception:
                 pass
 
-    def step(self, callback):
+    def is_finished(self):
+        return self._stop
+
+    def step(self, activity_scores=None):
         """
         - read chunks from solver stdout (binary)
         - accumulate lines, parse only lines starting with b'l' or b'm'
@@ -62,40 +84,19 @@ class SolverController:
 
         self.learnt_clauses = []
         self.total_learnts = 0
+            
+        reward = 0
+        did_action = False
 
         if time.time() - self.start_time > self.timeout_secs:
             if self.verb > 0:
                 print("Timeout reached, stopping solver")
             self.stop()
-            return self.learnt_clauses, self.fixed_clauses, True, None, time.time() - self.start_time
+            return self.learnt_clauses, reward, True, None, time.time() - self.start_time
 
         for line in reader:
             line = line.strip()
-            if line.startswith("m "):
-                match line:
-                    case "m learnt done":
-                        if self.verb > 0:
-                            print(f"Read {self.total_learnts} learnt clauses")
-                    case "m learnt start":
-                        self.total_learnts = 0
-                        self.reading_learnts = True
-                    case "m fixed done":
-                        if self.verb > 0:
-                            print(f"Read {self.total_fixed} fixed clauses")
-                    case "m fixed start":
-                        pass
-                    case "m activity start":
-                        if self.verb > 0:
-                            print("Calculating activities...")
-                        self._handle_batch(callback, writer)
-                        return self.learnt_clauses, self.fixed_clauses, False, None, time.time() - self.start_time
-
-                    case _:
-                        if self.verb > 0:
-                            print(f"Solver message: {line[2:]}")
-
-
-            elif line.startswith("l "):
+            if line.startswith("l "):
                 clause = [int(x) for x in line.split()[1:]]
                 if self.reading_learnts:
                     self.learnt_clauses.append(clause)
@@ -104,39 +105,67 @@ class SolverController:
                     self.fixed_clauses.append(clause)
                     self.total_fixed += 1
             
+            elif line.startswith("m "):
+                match line:
+                    case "m learnt done":
+                        if self.verb > 0:
+                            print(f"Read {self.total_learnts} learnt clauses")
+                        if did_action:
+                            return self.learnt_clauses, reward, False, None, time.time() - self.start_time                            
+                    case "m learnt start":
+                        self.total_learnts = 0
+                        self.reading_learnts = True
+                    case "m fixed done":
+                        raise RuntimeError("Unexpected 'm fixed done' during step; should only appear during start()")
+                    
+                    case "m activity start":
+                        if self.verb > 0:
+                            print("Calculating activities...")
+                        if activity_scores is None:
+                            raise RuntimeError("Activity scores expected but not provided")
+                        for i in activity_scores:
+                            writer.write(i + "\n")
+                        writer.write("m done\n")
+                        writer.flush()
+                        did_action = True
+
+                    case _:
+                        if line.startswith("m reward "):
+                            reward = float(line.split(" ")[2])
+                        if self.verb > 0:
+                            print(f"Solver message: {line[2:]}")
+            
             elif line.startswith("v "):
                 if self.verb > 0:
                     print("solved")
                 self.stop()
-                return self.learnt_clauses, self.fixed_clauses, True, line.split(" ")[1:], time.time() - self.start_time
+                return self.learnt_clauses, 100, True, line.split(" ")[1:], time.time() - self.start_time # solve reward
+            
+            elif line.startswith("s "): #only happens if unsat
+                print(line)
+                self.stop()
+                return self.learnt_clauses, 0, True, None, time.time() - self.start_time
 
             else:
                 print(line)
                     
-          
-    def _handle_batch(self, callback, writer):
-        """
-        Call the callback and write the activity scores to solver stdin as index value pairs
-        """
-        resp = callback(self.fixed_clauses, self.learnt_clauses)
-        for i in resp:
-            writer.write(i + "\n")
-        writer.write("m done\n")
-        writer.flush()
+
+    def zero_scores(self):
+        return [f"{i} {0.0}" for i in range(self.inst[2])]
 
 if __name__ == "__main__":
-    inst = Instance(seed=42, rounds=21)
+    inst = Instance(seed=41, rounds=21)
     solver = SolverController()
-    cnf_path, true_model, _, _ = inst.generate(p=0.01)
-    shutil.copy(cnf_path, "cnf/last_instance.cnf")
-    def callback(a, b):
-        return [f"{i} {0.0}" for i in range(inst.nvars)]
-    solver.start(cnf_path, 10000)
+    cnf = inst.generate()
+    #shutil.copy(cnf_path, "cnf/last_instance.cnf")
+    runtime=0
+    solver.start(cnf, 500000)
     while not solver._stop:
-        learnts, fixed, done, model, runtime = solver.step(callback)
-    for i in zip(model, true_model):
-        if int(i[0]) != i[1]:
-            print(i)
-    
+        learnts, reward, done, model, runtime = solver.step(solver.zero_scores())
+    print(runtime)
+        
+    # for i in zip(model, true_model):
+    #     if int(i[0]) != i[1]:
+    #         #print("mismatch", i)
     
 

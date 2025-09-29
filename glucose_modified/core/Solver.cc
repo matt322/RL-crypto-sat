@@ -1446,6 +1446,13 @@ lbool Solver::search(int nof_conflicts) {
 
     starts++;
 
+    //MODIFICATION loop variables
+    int last_decisions = 0;
+    int last_conflicts = 0;
+    std::ios::sync_with_stdio(false);
+
+
+
     // simplify
     if (useLCM && performLCM){
         //printf("###simplifyAll: %lld\n", conflicts);
@@ -1570,15 +1577,13 @@ lbool Solver::search(int nof_conflicts) {
         } else {
            // MODIFICATION decision limit
             if (decision_limit != 0 && decisions > 0 && decisions % decision_limit == 0 ) {
-                auto start = std::chrono::high_resolution_clock::now();
+                double reward = decisions > 0 ? (conflicts - last_conflicts)*1.0/(decisions - last_decisions) : 0.0;
+                last_conflicts = conflicts;
+                last_decisions = decisions;
+                printf("m reward %f\n",  reward);
                 decisions++; // to avoid being called again at next iteration
-                writeClauses(true);
-                auto printTime = std::chrono::high_resolution_clock::now();
-                std::cout << "c clause write time: " << std::chrono::duration_cast<std::chrono::milliseconds>(printTime - start).count() << "ms" << std::endl;
+                writeClauses(true, 2);
                 waitForActivityScores();
-                auto scoresTime = std::chrono::high_resolution_clock::now();
-                std::cout << "c activity score time: " << std::chrono::duration_cast<std::chrono::milliseconds>(scoresTime - printTime).count() << "ms" << std::endl;
-                return l_Undef;
             }
 
 
@@ -2022,36 +2027,72 @@ void Solver::parallelImportClauseDuringConflictAnalysis(Clause &, CRef ) {
 //=================================================================================================
 //MODIFICATIONS
 
-void Solver::writeClauses(bool onlyLearnts) {
+void Solver::writeClauses(bool onlyLearnts, int verb) {
+    auto start = std::chrono::high_resolution_clock::now();
     vec<CRef>& outputClauses = onlyLearnts ? learnts : clauses;
     std::string clause_type = onlyLearnts ? "learnt" : "fixed";
-    std::cout << "m " << clause_type << " start\n";
+    int totallits = 0;
+    std::string buffer;
+    buffer.reserve(50ull * 1024 * 1024); // ~50 MB pre-allocated if needed
+
+    buffer.append("m ");
+    buffer.append(clause_type);
+    buffer.append(" start\n");
+
     for (int i = 0; i < outputClauses.size(); i++) {
         const Clause& c = ca[outputClauses[i]];
-        if (c.mark() == 0) { // Only write active clauses
-            std::cout << 'l';
-            for (int j = 0; j < c.size(); j++) {
-                std::cout << " " << (var(c[j]) + 1) * (-2 * sign(c[j]) + 1);
-            }
-            std::cout << "\n";
+        buffer.push_back('l');
+        for (int j = 0; j < c.size(); j++) {
+            totallits++;
+            int lit_val = (var(c[j]) + 1) * (-2 * sign(c[j]) + 1);
+            buffer.push_back(' ');
+            buffer.append(std::to_string(lit_val));
         }
+        buffer.push_back('\n');
     }
-    std::cout << "m " << clause_type << " done\n" << std::flush;
+
+    buffer.append("m ");
+    buffer.append(clause_type);
+    buffer.append(" done\n");
+    auto buildTime = std::chrono::high_resolution_clock::now();
+
+    FILE* out = stdout;
+    fwrite(buffer.data(), 1, buffer.size(), out);
+    fflush(out);
+
+   if (verb > 1) {
+        printf("c written %d %s clauses with total %d literals.\n",
+            (int)outputClauses.size(),
+            clause_type.c_str(),
+            totallits);
+
+        printf("c clause build time: %lldms\n",
+            (long long)std::chrono::duration_cast<std::chrono::milliseconds>(buildTime - start).count());
+    }
+
+    if (verb > 0) {
+        auto writeTime = std::chrono::high_resolution_clock::now();
+        printf("c clause write time: %lldms\n",
+            (long long)std::chrono::duration_cast<std::chrono::milliseconds>(writeTime - start).count());
+    }
 }
 
 void Solver::waitForActivityScores() {
-    std::cout << "m activity start" << std::endl;
+    printf("m activity start\n");
     std::string line;
     while (getline(std::cin, line)) {
         if (line.empty()) continue;
         if (line == "m done") break;
+
         int idx;
         double val;
         std::istringstream iss(line);
         if (!(iss >> idx >> val)) {
             continue;
         }
-        if (idx >= activity.size()) throw std::runtime_error("Invalid index in activity scores: " + std::to_string(idx));
+        if (idx >= activity.size()) {
+            throw std::runtime_error("Invalid index in activity scores: " + std::to_string(idx));
+        }
         activity[idx] = val;
     }
 }

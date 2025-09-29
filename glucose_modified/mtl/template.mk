@@ -25,7 +25,11 @@ COPTIMIZE ?= -O3
 
 #INCLUDES := $(shell python3 -m pybind11 --includes)
 
-CFLAGS    += -I$(MROOT) -undefined dynamic_lookup -D __STDC_LIMIT_MACROS -D __STDC_FORMAT_MACROS
+CFLAGS    += -I$(MROOT) -D __STDC_LIMIT_MACROS -D __STDC_FORMAT_MACROS
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+    CFLAGS += -undefined dynamic_lookup
+endif
 LFLAGS    += -lz 
 
 .PHONY : s p d r rs clean 

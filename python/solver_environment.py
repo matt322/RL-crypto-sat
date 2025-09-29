@@ -10,7 +10,6 @@ class SolverEnv(gym.Env):
         self.nvars = self.sha1_instance.nvars
         self.max_clauses = 1000000 #max in neurocore paper
         self.solver = SolverController()
-        self.fixed_clauses = []
         self.action_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.nvars,), dtype=np.float32) #neurocore outputs a prob dist over variables and scales by nvars * 10e4
         #Observation space: in the GNN we have G @ V where G is Nclauses x Nvars "adjacency matrix" and V is Nvars x features
         #C_update(G @ V) is aggregating variable embeddings for each clause and passing through nn C_update. 
@@ -18,12 +17,22 @@ class SolverEnv(gym.Env):
         #also, it shouldn't be too hard to modify glucose to store a list of preferred polarities rather than doing random
         self.observation_space = gym.spaces.Box(low=0, high=1, shape=(self.nvars, self.max_clauses), dtype=np.float32)
 
-    def update_clauses(self):
+    def clauses_to_adj(self, clauses):
+        pass
 
 
     def reset(self, seed=None):
         super().reset(seed=seed)
+        if seed:
+            self.sha1_instance = Instance(rounds=self.sha1_instance.rounds, seed=seed)
+        self.cnf = self.sha1_instance.generate()
+        self.fixed_clauses = self.clauses_to_adj(self.solver.start(self.cnf))
+        return self.fixed_clauses, {}
+
 
 
     def step(self, action):
-        pass
+        learnt, reward, done, model, time = self.solver.step(activity_scores=[f"{i+1} {score}" for i, score in enumerate(action)])
+        truncated = done and model is None
+        return learnt, reward, done, truncated, {"step time": time}
+        
