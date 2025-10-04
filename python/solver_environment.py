@@ -2,6 +2,7 @@ import gymnasium as gym
 import numpy as np
 from solver_interface import SolverController
 from instance_generation import Instance
+import torch
 
 class SolverEnv(gym.Env):
     def __init__(self, rounds=21, ):
@@ -17,8 +18,16 @@ class SolverEnv(gym.Env):
         #also, it shouldn't be too hard to modify glucose to store a list of preferred polarities rather than doing random
         self.observation_space = gym.spaces.Box(low=0, high=1, shape=(self.nvars, self.max_clauses), dtype=np.float32)
 
-    def clauses_to_adj(self, clauses):
-        pass
+    def clauses_to_tensor(self, clauses): #keeping it modular since the clause passing will change
+        crow_indices = [0]
+        col_indices = []
+        for clause in clauses:
+            crow_indices.append(len(clause) + crow_indices[-1])
+            for lit in clause:
+                idx = lit - 1 if lit > 0 else self.nvars + (-lit - 1)
+                col_indices.append(idx)
+        values = [1] * len(col_indices)
+        return torch.sparse_csr_tensor(torch.tensor(crow_indices), torch.tensor(col_indices), torch.tensor(values))
 
 
     def reset(self, seed=None):
@@ -36,3 +45,9 @@ class SolverEnv(gym.Env):
         truncated = done and model is None
         return learnt, reward, done, truncated, {"step time": time}
         
+if __name__ == "__main__":
+    env = SolverEnv(rounds=21)
+    env.nvars = 4
+    clauses = [[1, -3, 4], [-1, 2], [-2, 3], [-4]]
+    tensor = env.clauses_to_tensor(clauses)
+    print(tensor)

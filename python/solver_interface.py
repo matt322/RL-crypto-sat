@@ -1,7 +1,6 @@
 import subprocess
 import time
 from instance_generation import Instance
-import shutil
 
 #init solver, will write learnts to stdout and take activity scores as input
 #immediately yield non-learnt clauses (after simplification)
@@ -11,15 +10,18 @@ import shutil
 
 
 class SolverController:
-    def __init__(self, solver_path="glucose_modified/simp/glucose", verb=0):
+    def __init__(self, solver_path="glucose_modified/simp/glucose"):
         self.solver_path = solver_path
         self.proc = None
         self._stop = False
-        self.verb = verb
         
-    def start(self, cnf_inst, decisions_per_callback=200000, timeout_secs=1000, args = []):
+    def start(self, cnf_inst, decisions_per_callback=200000, timeout_secs=2**31, args = [], verb=0):
+        self.verb=verb
+        self._stop = False
         self.inst = cnf_inst
-        solverargs = [self.solver_path, cnf_inst[0], "-model", f"-decisions={decisions_per_callback}", "-verb=0"]
+        solverargs = [self.solver_path, cnf_inst[0], "-model", f"-decisions={decisions_per_callback}", f"-verb={0 if self.verb < 2 else 1}"]
+        if timeout_secs < 2**31:
+            solverargs.append(f"-cpu-lim={timeout_secs}")
         solverargs.extend(args)
         self.proc = subprocess.Popen(
             solverargs,
@@ -74,7 +76,7 @@ class SolverController:
         - when 'm done' seen, invoke callback(clauses)
         - write callback result (bytes/str) to solver stdin, flush
         - repeat until solver exits or stop() called
-        returns: (learnt_clauses, fixed_clauses, done, model, time since start)
+        returns: (learnt_clauses, reward, done, model, time since start)
         """
         if self.proc is None:
             raise RuntimeError("Process not started; call start() first")
@@ -96,7 +98,10 @@ class SolverController:
 
         for line in reader:
             line = line.strip()
+            
             if line.startswith("l "):
+                if self.verb > 3:
+                    print(line)
                 clause = [int(x) for x in line.split()[1:]]
                 if self.reading_learnts:
                     self.learnt_clauses.append(clause)
@@ -104,11 +109,13 @@ class SolverController:
                 else:
                     self.fixed_clauses.append(clause)
                     self.total_fixed += 1
-            
+
             elif line.startswith("m "):
+                if self.verb > 2:
+                    print(line)
                 match line:
                     case "m learnt done":
-                        if self.verb > 0:
+                        if self.verb > 1:
                             print(f"Read {self.total_learnts} learnt clauses")
                         if did_action:
                             return self.learnt_clauses, reward, False, None, time.time() - self.start_time                            
@@ -119,7 +126,7 @@ class SolverController:
                         raise RuntimeError("Unexpected 'm fixed done' during step; should only appear during start()")
                     
                     case "m activity start":
-                        if self.verb > 0:
+                        if self.verb > 1:
                             print("Calculating activities...")
                         if activity_scores is None:
                             raise RuntimeError("Activity scores expected but not provided")
@@ -132,22 +139,19 @@ class SolverController:
                     case _:
                         if line.startswith("m reward "):
                             reward = float(line.split(" ")[2])
-                        if self.verb > 0:
+                        if self.verb > 1:
                             print(f"Solver message: {line[2:]}")
             
             elif line.startswith("v "):
-                if self.verb > 0:
-                    print("solved")
+                if self.verb > 1:
+                    print(line)
                 self.stop()
                 return self.learnt_clauses, 100, True, line.split(" ")[1:], time.time() - self.start_time # solve reward
-            
-            elif line.startswith("s "): #only happens if unsat
-                print(line)
-                self.stop()
-                return self.learnt_clauses, 0, True, None, time.time() - self.start_time
 
             else:
-                print(line)
+                if self.verb > 0:
+                    print(line)
+        return self.learnt_clauses, 0, True, None, time.time() - self.start_time #process exited
                     
 
     def zero_scores(self):
@@ -159,10 +163,11 @@ if __name__ == "__main__":
     cnf = inst.generate()
     #shutil.copy(cnf_path, "cnf/last_instance.cnf")
     runtime=0
-    solver.start(cnf, 500000)
+    model = None
+    solver.start(cnf, 50000, timeout_secs=40, verb=1)
     while not solver._stop:
         learnts, reward, done, model, runtime = solver.step(solver.zero_scores())
-    print(runtime)
+    print(model is None)
         
     # for i in zip(model, true_model):
     #     if int(i[0]) != i[1]:

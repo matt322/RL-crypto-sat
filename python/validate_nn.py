@@ -1,6 +1,5 @@
 from gnn import rl_GNN1
 
-
 config = {
   "clause_dim":64,
   "lit_dim":16,
@@ -13,6 +12,5 @@ config = {
 
 cnf = 
 
-
-model = rl_GNN1(clause_dim=64, var_dim=16, n_layers=3, n_rounds=21)
+model = rl_GNN1(**config)
 

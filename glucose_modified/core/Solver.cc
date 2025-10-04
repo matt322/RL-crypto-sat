@@ -2033,7 +2033,7 @@ void Solver::writeClauses(bool onlyLearnts, int verb) {
     std::string clause_type = onlyLearnts ? "learnt" : "fixed";
     int totallits = 0;
     std::string buffer;
-    buffer.reserve(50ull * 1024 * 1024); // ~50 MB pre-allocated if needed
+    buffer.reserve(50ull * 1024 * 1024); 
 
     buffer.append("m ");
     buffer.append(clause_type);
