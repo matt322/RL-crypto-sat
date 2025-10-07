@@ -47,16 +47,19 @@ class Instance:
         return self.sha1_pad(random_bits)
 
 
-    def generate(self, p=0.0, simplify=False):
+    def generate(self, free_outputs=0, simplify=False):
         """
         Generate a new instance in the file associated to the object with variables revealed according to probability p
+
+        Returns: (instancefile, solution, nvars, nclauses)
         """
-        assert 0 <= p <= 1, "Probability p must be between 0 and 1"
+        assert 0 <= free_outputs <= 160, "160 output bits can be freed at most"
         inputs = list(range(1, 512+1))
         input_str = self.random_input()
         for i in range(len(input_str)):
             inputs[i] *= 2 * int(input_str[i]) - 1
         outputs = list(range((self.rounds + 5) * 32, (self.rounds + 10) * 32)) #variable names in cnf are 1 indexed, these are indices of the soln list
+        free_outputs_list = random.sample(outputs, free_outputs)
         shutil.copy(self.cnf_path, self.instancefile)
 
         with open(self.instancefile, mode='a') as f:
@@ -67,7 +70,7 @@ class Instance:
         shutil.copy(self.cnf_path, self.instancefile)
         with open(self.instancefile, mode='a') as f:
             for i,v in enumerate(soln):
-                if random.random() < p or (i >= outputs[0] and i <= outputs[-1]):
+                if i >= outputs[0] and i <= outputs[-1] and i not in free_outputs_list:
                     f.write(f"{v} 0\n")
         if simplify:
             subprocess.run(f"{self.solver_path} {self.instancefile} -dimacs={self.instancefile}", text=True, shell=True, stdout=subprocess.DEVNULL)

@@ -264,6 +264,7 @@ class rl_GNN1(nn.Module):
     if not self.normalize:
       self.C_layer_norm = nn.LayerNorm(clause_dim)
 
+
   def forward(self, G):
     n_clauses, n_lits = G.size()
     n_vars = n_lits/2
@@ -277,6 +278,8 @@ class rl_GNN1(nn.Module):
         C_pre_msg = torch.cat([L, L_flip, torch.ones(G.size()[1],1, dtype=torch.float32, device=G.device)], dim=1)
       else:
         C_pre_msg = torch.cat([L, L_flip], dim=1)
+      print("G:", G.shape, G.layout, G._nnz(), len(G.crow_indices()[0]), G.col_indices().shape, G.values().shape)
+      
       C_msg = torch.sparse.mm(G, C_pre_msg)
 
       if self.average_pool:
@@ -307,4 +310,4 @@ class rl_GNN1(nn.Module):
 
     V = torch.cat([L[0:int(L.size()[0]/2)], L[int(L.size()[0]/2):]], dim=1)
 
-    return (self.V_score(V), self.V_vote(V)) # return policy logits and value logits before averaging (for unbatching)
+    return (self.V_score(V), self.V_vote(V)) 

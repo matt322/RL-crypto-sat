@@ -1576,7 +1576,7 @@ lbool Solver::search(int nof_conflicts) {
 
         } else {
            // MODIFICATION decision limit
-            if (decision_limit != 0 && decisions > 0 && decisions % decision_limit == 0 ) {
+            if (decision_limit != 0 && decisions % decision_limit == 0 ) {
                 double reward = decisions > 0 ? (conflicts - last_conflicts)*1.0/(decisions - last_decisions) : 0.0;
                 last_conflicts = conflicts;
                 last_decisions = decisions;
@@ -2095,4 +2095,5 @@ void Solver::waitForActivityScores() {
         }
         activity[idx] = val;
     }
+    rebuildOrderHeap();
 }

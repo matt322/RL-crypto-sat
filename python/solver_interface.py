@@ -161,16 +161,12 @@ if __name__ == "__main__":
     inst = Instance(seed=41, rounds=21)
     solver = SolverController()
     cnf = inst.generate()
-    #shutil.copy(cnf_path, "cnf/last_instance.cnf")
-    runtime=0
-    model = None
-    solver.start(cnf, 50000, timeout_secs=40, verb=1)
-    while not solver._stop:
-        learnts, reward, done, model, runtime = solver.step(solver.zero_scores())
-    print(model is None)
-        
-    # for i in zip(model, true_model):
-    #     if int(i[0]) != i[1]:
-    #         #print("mismatch", i)
+    model = cnf[1]
+    # Test the activity score replacement: solver assigns polarity 0 by default so branching on all the 0 variables first solves it. this is a baseline for the 
+    # overall performance of the method.
+    scores = [f"{i} {1 if v < 0 else 0}" for i,v in enumerate(model)]
+    solver.start(cnf, 100000, timeout_secs=40, verb=1)
+    print(solver.step(scores))
+   
     
 
