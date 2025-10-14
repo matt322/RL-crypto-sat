@@ -1,6 +1,9 @@
 import subprocess
 import time
 from instance_generation import Instance
+from multiprocessing import shared_memory, resource_tracker
+import numpy as np
+import gc
 
 #init solver, will write learnts to stdout and take activity scores as input
 #immediately yield non-learnt clauses (after simplification)
@@ -40,10 +43,15 @@ class SolverController:
         self.total_fixed = 0
         self.start_time = time.time()
         self.timeout_secs = timeout_secs
+        self.log = []
 
-        reader = self.proc.stdout
-        for line in reader:
+        self.reader = self.proc.stdout
+        self.writer = self.proc.stdin
+
+        for line in self.reader:
             line = line.strip()
+            if self.verb > 3:
+                print(line)
             if line.startswith("l "):
                 clause = [int(x) for x in line.split()[1:]]
                 self.fixed_clauses.append(clause)
@@ -53,6 +61,13 @@ class SolverController:
                     if self.verb > 0:
                         print(f"Read {self.total_fixed} fixed clauses")
                     break
+                if line.startswith("m shared_mem name"):
+                    self.shm_name = line.split(" ")[3]
+                if line.startswith("m csr written"):
+                    if self.verb > 1:
+                        print(f"Reading CSR from shared memory: {self.shm_name}")
+                    csr = self.read_from_shared_mem(self.shm_name)
+                    return csr, 0, False, None, time.time() - self.start_time
         return self.fixed_clauses
                 
 
@@ -81,9 +96,6 @@ class SolverController:
         if self.proc is None:
             raise RuntimeError("Process not started; call start() first")
 
-        reader = self.proc.stdout
-        writer = self.proc.stdin
-
         self.learnt_clauses = []
         self.total_learnts = 0
             
@@ -96,7 +108,7 @@ class SolverController:
             self.stop()
             return self.learnt_clauses, reward, True, None, time.time() - self.start_time
 
-        for line in reader:
+        for line in self.reader:
             line = line.strip()
             
             if line.startswith("l "):
@@ -126,20 +138,27 @@ class SolverController:
                         raise RuntimeError("Unexpected 'm fixed done' during step; should only appear during start()")
                     
                     case "m activity start":
-                        if self.verb > 1:
+                        if self.verb > 2:
                             print("Calculating activities...")
                         if activity_scores is None:
                             raise RuntimeError("Activity scores expected but not provided")
                         for i in activity_scores:
-                            writer.write(i + "\n")
-                        writer.write("m done\n")
-                        writer.flush()
+                            self.writer.write(i + "\n")
+                        self.writer.write("m done\n")
+                        self.writer.flush()
                         did_action = True
 
                     case _:
+                        if line.startswith("m shared_mem name"):
+                            self.shm_name = line.split(" ")[3][1:]
+                        if line.startswith("m csr written"):
+                            csr = self.read_from_shared_mem(self.shm_name)
+                            if self.verb > 1:
+                                print(f"Read {csr["nclauses"]} clauses from shared memory")
+                            return csr, 0, False, None, time.time() - self.start_time
                         if line.startswith("m reward "):
                             reward = float(line.split(" ")[2])
-                        if self.verb > 1:
+                        if self.verb > 2:
                             print(f"Solver message: {line[2:]}")
             
             elif line.startswith("v "):
@@ -152,21 +171,55 @@ class SolverController:
                 if self.verb > 0:
                     print(line)
         return self.learnt_clauses, 0, True, None, time.time() - self.start_time #process exited
-                    
+
+
+    def read_from_shared_mem(self, shm_name):
+        shm = shared_memory.SharedMemory(name=shm_name)
+        buf = shm.buf
+
+        header = np.frombuffer(buf, dtype=np.int32, count=3, offset=0)
+        n_clauses = int(header[0])
+        n_lits = int(header[1])
+        nnz = int(header[2])
+        crow_bytes = (n_clauses + 1) * 4
+
+        off_crow = 3 * 4
+        off_col = off_crow + crow_bytes
+        crow_arr = np.frombuffer(buf, dtype=np.int32, count=n_clauses + 1, offset=off_crow).copy()
+        col_arr  = np.frombuffer(buf, dtype=np.int32, count=nnz, offset=off_col).copy()
+
+        del buf
+        del header
+
+        self.writer.write("m csr ack\n")
+        self.writer.flush()
+        resource_tracker.unregister(shm._name, "shared_memory")
+        shm.close()
+
+        return {"crow_indices": crow_arr,
+                "col_indices": col_arr,
+                "values": np.ones(nnz, dtype=np.int32),
+                "nlits": n_lits,
+                "nclauses": n_clauses,
+                "nnz": nnz
+            }
+
 
     def zero_scores(self):
         return [f"{i} {0.0}" for i in range(self.inst[2])]
+
+
+
 
 if __name__ == "__main__":
     inst = Instance(seed=41, rounds=21)
     solver = SolverController()
     cnf = inst.generate()
-    model = cnf[1]
-    # Test the activity score replacement: solver assigns polarity 0 by default so branching on all the 0 variables first solves it. this is a baseline for the 
-    # overall performance of the method.
-    scores = [f"{i} {1 if v < 0 else 0}" for i,v in enumerate(model)]
-    solver.start(cnf, 100000, timeout_secs=40, verb=1)
-    print(solver.step(scores))
+    #model = cnf[1]
+    solver.start(cnf, 50000, timeout_secs=40, verb=2)
+    for i in range(10):
+        solver.step(solver.zero_scores())
+
    
     
 

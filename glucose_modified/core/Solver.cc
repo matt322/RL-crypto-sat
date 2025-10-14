@@ -51,6 +51,13 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <iostream>
 #include <sstream>
 #include <chrono>
+#include <string>
+
+#include <vector>
+#include <sys/mman.h>
+#include <sys/stat.h>        
+#include <fcntl.h>           
+#include <unistd.h>
 
 #include "utils/System.h"
 #include "mtl/Sort.h"
@@ -1582,7 +1589,8 @@ lbool Solver::search(int nof_conflicts) {
                 last_decisions = decisions;
                 printf("m reward %f\n",  reward);
                 decisions++; // to avoid being called again at next iteration
-                writeClauses(true, 2);
+                //writeClauses(true, 2);
+                writeCSRToSharedMem(true, 2);
                 waitForActivityScores();
             }
 
@@ -2075,6 +2083,80 @@ void Solver::writeClauses(bool onlyLearnts, int verb) {
         printf("c clause write time: %lldms\n",
             (long long)std::chrono::duration_cast<std::chrono::milliseconds>(writeTime - start).count());
     }
+}
+
+void Solver::writeCSRToSharedMem(bool onlyLearnts, int verb) { //writes crow_indices and col_indices to shared memory. Values and padding done in python
+    std::vector<int> crow_indices = {0};
+    std::vector<int> col_indices;
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    vec<CRef>& outputClauses = onlyLearnts ? learnts : clauses;
+    std::string clause_type = onlyLearnts ? "learnt" : "fixed";
+    int totallits = 0;
+    int n_vars = nVars();
+    int n_lits = 2 * n_vars;
+    int n_clauses = outputClauses.size();
+
+    for (int i = 0; i < n_clauses; i++) {
+        const Clause& c = ca[outputClauses[i]];
+        int clause_size = c.size();
+        crow_indices.push_back(clause_size + crow_indices.back());
+        for (int j = 0; j < clause_size; j++) {
+            totallits++;
+            int lit_idx = var(c[j]) + n_vars * sign(c[j]); // ~x gets idx (x-1) + nvars
+            col_indices.push_back(lit_idx);
+        }
+    }
+    int nnz = col_indices.size();
+
+    size_t header_bytes = 3 * sizeof(int);
+    size_t crow_bytes = crow_indices.size() * sizeof(int);
+    size_t col_bytes = col_indices.size() * sizeof(int);
+    size_t total_bytes = header_bytes + crow_bytes + col_bytes;
+
+    std::string shm_name = "/csr_shared_mem_" + std::to_string(getpid());
+    int fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
+    printf("m shared_mem name %s\n", shm_name.c_str());
+    if (fd < 0) {
+        perror("shm_open");
+        exit(1);
+    }
+    if (ftruncate(fd, (off_t)total_bytes) != 0) {
+        perror("ftruncate");
+        exit(1);
+    }
+    void *ptr = mmap(nullptr, total_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ptr == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
+    }
+    char *p = (char*)ptr;
+    memcpy(p, &n_clauses, sizeof(int));
+    memcpy(p + sizeof(int), &n_vars, sizeof(int));
+    memcpy(p + 2 * sizeof(int), &nnz, sizeof(int));
+    memcpy(p + header_bytes, crow_indices.data(), crow_bytes);
+    memcpy(p + header_bytes + crow_bytes, col_indices.data(), col_bytes);
+    msync(ptr, total_bytes, MS_SYNC);
+    auto writeTime = std::chrono::high_resolution_clock::now();
+    printf("m csr written %i\n", total_bytes);
+
+    std::string line;
+    if (getline(std::cin, line) && line == "m csr ack") {
+        munmap(ptr, total_bytes);
+        close(fd);
+        shm_unlink(shm_name.c_str());
+    } else {
+        throw std::runtime_error("No ack received after writing CSR to shared memory");
+    }
+
+    auto ackTime = std::chrono::high_resolution_clock::now();
+    if (verb > 0) {
+        printf("c shared memory write time: %lldms\n",
+            (long long)std::chrono::duration_cast<std::chrono::milliseconds>(writeTime - start).count());
+        printf("c shared memory ack time: %lldms\n",
+            (long long)std::chrono::duration_cast<std::chrono::milliseconds>(ackTime - writeTime).count());
+    }
+
 }
 
 void Solver::waitForActivityScores() {

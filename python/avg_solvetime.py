@@ -22,8 +22,8 @@ def average_solve_time(logfile, rounds=21, num_instances=10, timeout=1000, decis
         
 
 if __name__ == "__main__":
-    average_solve_time("logs/avg_solvetime_log.jsonl", rounds=21, num_instances=100, timeout=200, decisions_per_callback=0, free_outputs=0)
-    average_solve_time("logs/avg_solvetime_log.jsonl", rounds=21, num_instances=100, timeout=200, decisions_per_callback=500000, free_outputs=0)
+    #average_solve_time("logs/avg_solvetime_log.jsonl", rounds=21, num_instances=100, timeout=200, decisions_per_callback=0, free_outputs=0)
+    average_solve_time("logs/avg_solvetime_log.jsonl", rounds=21, num_instances=50, timeout=200, decisions_per_callback=500000, free_outputs=0)
     average_solve_time("logs/avg_solvetime_log.jsonl", rounds=21, num_instances=100, timeout=100, decisions_per_callback=0, free_outputs=4)
     average_solve_time("logs/avg_solvetime_log.jsonl", rounds=21, num_instances=100, timeout=100, decisions_per_callback=0, free_outputs=8)
     average_solve_time("logs/avg_solvetime_log.jsonl", rounds=21, num_instances=100, timeout=100, decisions_per_callback=0, free_outputs=16)

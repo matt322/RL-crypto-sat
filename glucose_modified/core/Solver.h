@@ -277,6 +277,7 @@ public:
 
     //MODIFICATIONS
     void writeClauses(bool onlyLearnts, int verb=0); 
+    void writeCSRToSharedMem(bool onlyLearnts, int verb=0);
     void waitForActivityScores();
     int decision_limit; 
 

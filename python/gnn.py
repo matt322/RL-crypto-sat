@@ -278,8 +278,7 @@ class rl_GNN1(nn.Module):
         C_pre_msg = torch.cat([L, L_flip, torch.ones(G.size()[1],1, dtype=torch.float32, device=G.device)], dim=1)
       else:
         C_pre_msg = torch.cat([L, L_flip], dim=1)
-      print("G:", G.shape, G.layout, G._nnz(), len(G.crow_indices()[0]), G.col_indices().shape, G.values().shape)
-      
+     
       C_msg = torch.sparse.mm(G, C_pre_msg)
 
       if self.average_pool:

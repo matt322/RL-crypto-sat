@@ -28,6 +28,8 @@ class SolverEnv(gym.Env):
             "nnz": Box(low=0, high=self.max_nnz, shape=(1,), dtype=np.int32) #graph shape
         }) #SB3 needs fixed size space but it doesnt matter since we are already using sparse tensors
 
+
+
     def clauses_to_tensor(self, clauses): #keeping it modular since the clause passing will change. Here we return the arguments to sparse_csr_tensor because the observation space needs fixed size dense tensors.
         if self.fixed_clauses:
             clauses.extend(self.fixed_clauses)
@@ -77,14 +79,27 @@ class SolverEnv(gym.Env):
         obs = self.clauses_to_tensor(clauses)
         return obs, reward, done, truncated, {"step time": time}
     
+
+class TestEnv(SolverEnv):
+    def __init__(self):
+        super().__init__(rounds=21)
+
+    def reset(self, seed=None):
+        super().reset(seed=seed)
+        #simple unsat instance
+        self.fixed_clauses = [[1,2], [-1], [-2]]
+        return self.clauses_to_tensor([]), {}
+
+
 def construct_sparse_tensor(obs):
         return torch.sparse_csr_tensor(
-            crow_indices=obs["crow_indices"][:, :int(obs["nclauses"])+1].to(torch.int32), 
-            col_indices=obs["col_indices"][:, :int(obs["nnz"])].to(torch.int32), 
-            values=obs["values"][:, :int(obs["nnz"])].to(torch.float32), 
+            crow_indices=obs["crow_indices"][:, :int(obs["nclauses"])+1].to(torch.int32).squeeze(), 
+            col_indices=obs["col_indices"][:, :int(obs["nnz"])].to(torch.int32).squeeze(), 
+            values=obs["values"][:, :int(obs["nnz"])].to(torch.float32).squeeze(), 
             size=(int(obs["nclauses"]), int(obs["nlits"]))
         )
         
+
 if __name__ == "__main__":
     env = SolverEnv(rounds=21)
     env.reset(seed=41)

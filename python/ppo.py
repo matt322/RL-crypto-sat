@@ -12,11 +12,13 @@ class GNNWrapper(nn.Module):
         self.gnn = rl_GNN1(**config)
         self.latent_dim_pi = None 
         self.latent_dim_vf = None
+        self.value_net = None
+        self.action_net = None
 
     def forward(self, x):
         x = construct_sparse_tensor(x)
         policy, value = self.gnn(x)
-        return policy, torch.mean(value)
+        return policy.squeeze(), torch.mean(value).unsqueeze(0)
 
 class GNNPolicy(ActorCriticPolicy):
     def __init__(self, *args, **kwargs):
@@ -37,23 +39,19 @@ class GNNPolicy(ActorCriticPolicy):
         self.mlp_extractor = GNNWrapper(config)
         self.mlp_extractor.latent_dim_pi = self.action_space.shape[0]
         self.mlp_extractor.latent_dim_vf = 1
+
+    def _build(self, lr_schedule):
+        super()._build(lr_schedule)
+        self.value_net = nn.Identity()        
         self.action_net = nn.Identity()
-        self.value_net = nn.Identity()
+
+    
 
 
 
 if __name__ == "__main__":
-    #test mm
-    A = torch.sparse_csr_tensor(
-        crow_indices=torch.tensor([0, 2, 3]).to(torch.int32),
-        col_indices=torch.tensor([0, 2, 1]).to(torch.int32),
-        values=torch.tensor([1.0, 2.0, 3.0]),
-        size=(2, 3)
-    )
-    B = torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-    print(torch.sparse.mm(A, B))
-    model = PPO(GNNPolicy, SolverEnv(), verbose=1)
-    model.learn(total_timesteps=100)
+    model = PPO(GNNPolicy, SolverEnv(), verbose=2)
+    model.learn(total_timesteps=10, progress_bar=True)
 
 
 
