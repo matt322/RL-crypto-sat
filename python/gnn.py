@@ -6,8 +6,7 @@ import torch.optim as optim
 import numpy as np
 import os
 
-from batch import Batcher
-import util
+
 
 def decode_activation(activation):
   if activation == "relu":

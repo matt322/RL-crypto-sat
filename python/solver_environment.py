@@ -30,38 +30,6 @@ class SolverEnv(gym.Env):
 
 
 
-    def clauses_to_tensor(self, clauses): #keeping it modular since the clause passing will change. Here we return the arguments to sparse_csr_tensor because the observation space needs fixed size dense tensors.
-        if self.fixed_clauses:
-            clauses.extend(self.fixed_clauses)
-        crow_indices = [0]
-        col_indices = []
-        nnz = 0
-        for clause in clauses:
-            if nnz + len(clause) > self.max_nnz:
-                break
-            else:
-                nnz += len(clause)
-            crow_indices.append(len(clause) + crow_indices[-1])
-            for lit in clause:
-                idx = lit - 1 if lit > 0 else self.nvars + (-lit - 1)
-                col_indices.append(idx)
-        values = [1] * nnz
-        n_clauses = len(clauses)
-        if n_clauses < self.max_clauses:
-            last_nnz = crow_indices[-1]
-            crow_indices.extend([last_nnz] * (self.max_clauses - n_clauses))
-        if nnz < self.max_nnz:
-            col_indices.extend([0] * (self.max_nnz - nnz))
-            values.extend([0] * (self.max_nnz - len(values)))
-        
-        return {"crow_indices":torch.tensor(crow_indices), 
-                "col_indices":torch.tensor(col_indices),
-                "values":torch.tensor(values),
-                "nlits":2*self.nvars,
-                "nclauses":n_clauses,
-                "nnz":nnz
-            } #shape is needed for sparse_csr_tensor
-
     def reset(self, seed=None):
         super().reset(seed=seed)
         if seed:
@@ -86,22 +54,8 @@ class TestEnv(SolverEnv):
 
     def reset(self, seed=None):
         super().reset(seed=seed)
-        #simple unsat instance
         self.fixed_clauses = [[1,2], [-1], [-2]]
         return self.clauses_to_tensor([]), {}
 
 
-def construct_sparse_tensor(obs):
-        return torch.sparse_csr_tensor(
-            crow_indices=obs["crow_indices"][:, :int(obs["nclauses"])+1].to(torch.int32).squeeze(), 
-            col_indices=obs["col_indices"][:, :int(obs["nnz"])].to(torch.int32).squeeze(), 
-            values=obs["values"][:, :int(obs["nnz"])].to(torch.float32).squeeze(), 
-            size=(int(obs["nclauses"]), int(obs["nlits"]))
-        )
-        
 
-if __name__ == "__main__":
-    env = SolverEnv(rounds=21)
-    env.reset(seed=41)
-    obs, _, _, _, info = env.step(np.random.rand(env.nvars) * 100000)
-    torch.sparse.mm(construct_sparse_tensor(obs), torch.rand((2*env.nvars, 1)))

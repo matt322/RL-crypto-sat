@@ -1,7 +1,7 @@
 from stable_baselines3 import PPO
 from stable_baselines3.common.policies import ActorCriticPolicy
 from gymnasium import spaces
-from solver_environment import SolverEnv, construct_sparse_tensor
+from solver_environment import SolverEnv
 from gnn import rl_GNN1
 import torch.nn as nn
 import torch
@@ -45,6 +45,16 @@ class GNNPolicy(ActorCriticPolicy):
         self.value_net = nn.Identity()        
         self.action_net = nn.Identity()
 
+def construct_sparse_tensor(obs):
+        """
+        converts SB3 internal representation of observation into pt sparse tensor
+        """
+        return torch.sparse_csr_tensor(
+            crow_indices=obs["crow_indices"][:, :int(obs["nclauses"])+1].to(torch.int32).squeeze(), 
+            col_indices=obs["col_indices"][:, :int(obs["nnz"])].to(torch.int32).squeeze(), 
+            values=obs["values"][:, :int(obs["nnz"])].to(torch.float32).squeeze(), 
+            size=(int(obs["nclauses"]), int(obs["nlits"]))
+        )
     
 
 

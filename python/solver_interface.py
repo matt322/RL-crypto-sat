@@ -62,7 +62,7 @@ class SolverController:
                         print(f"Read {self.total_fixed} fixed clauses")
                     break
                 if line.startswith("m shared_mem name"):
-                    self.shm_name = line.split(" ")[3]
+                    self.shm_name = line.split(" ")[3][1:]
                 if line.startswith("m csr written"):
                     if self.verb > 1:
                         print(f"Reading CSR from shared memory: {self.shm_name}")
@@ -208,10 +208,18 @@ class SolverController:
     def zero_scores(self):
         return [f"{i} {0.0}" for i in range(self.inst[2])]
 
-
+def verify_cnf():
+    inst = ["cnf/test.cnf", [], 40, 180]
+    solver = SolverController()
+    print(solver.start(inst, 100, verb=2))
+    while not solver.is_finished():
+        print(solver.step(solver.zero_scores()))
 
 
 if __name__ == "__main__":
+    verify_cnf()
+    exit()
+
     inst = Instance(seed=41, rounds=21)
     solver = SolverController()
     cnf = inst.generate()
