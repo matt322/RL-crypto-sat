@@ -6,8 +6,10 @@ from instance_generation import Instance
 import torch
 
 class SolverEnv(gym.Env):
-    def __init__(self, rounds=21, ):
+    def __init__(self, rounds=21, free_outputs=0, single_inst=False):
         super().__init__()
+        self.free_outputs = free_outputs
+        self.single_inst = single_inst
         self.sha1_instance = Instance(rounds=rounds)
         self.nvars = self.sha1_instance.nvars
         self.max_clauses = 200_000 #most ive observed is around 150k
@@ -34,7 +36,9 @@ class SolverEnv(gym.Env):
         super().reset(seed=seed)
         if seed:
             self.sha1_instance = Instance(rounds=self.sha1_instance.rounds, seed=seed)
-        self.cnf = self.sha1_instance.generate()
+        if self.single_inst:
+            self.sha1_instance = Instance(rounds=self.sha1_instance.rounds, seed=41)
+        self.cnf = self.sha1_instance.generate(self.free_outputs)
         self.fixed_clauses = self.solver.start(self.cnf)
         return self.clauses_to_tensor([]), {} #initial observation has no learnt clauses, fixed clauses added in method (whatever)
 
@@ -48,14 +52,7 @@ class SolverEnv(gym.Env):
         return obs, reward, done, truncated, {"step time": time}
     
 
-class TestEnv(SolverEnv):
-    def __init__(self):
-        super().__init__(rounds=21)
 
-    def reset(self, seed=None):
-        super().reset(seed=seed)
-        self.fixed_clauses = [[1,2], [-1], [-2]]
-        return self.clauses_to_tensor([]), {}
 
 
 

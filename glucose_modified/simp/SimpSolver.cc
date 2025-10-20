@@ -187,7 +187,10 @@ lbool SimpSolver::solve_(bool do_simp, bool turn_off_simp)
     }
 
     //MODIFICATION - write problem clauses after simplifying
-    Solver::writeCSRToSharedMem(false);
+    if (decision_limit != 0){
+        Solver::writeCSRToSharedMem(false);
+    }
+   
 
     if (result == l_True)
         result = Solver::solve_();

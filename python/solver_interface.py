@@ -68,7 +68,13 @@ class SolverController:
                         print(f"Reading CSR from shared memory: {self.shm_name}")
                     csr = self.read_from_shared_mem(self.shm_name)
                     return csr, 0, False, None, time.time() - self.start_time
-        return self.fixed_clauses
+            elif line.startswith("v "):
+                if self.verb > 1:
+                    print(line)
+                self.stop()
+                return self.fixed_clauses, 100, True, line.split(" ")[1:], time.time() - self.start_time 
+        self.stop()
+        return self.fixed_clauses, 0, True, None, time.time() - self.start_time
                 
 
         
@@ -217,14 +223,11 @@ def verify_cnf():
 
 
 if __name__ == "__main__":
-    verify_cnf()
-    exit()
-
     inst = Instance(seed=41, rounds=21)
     solver = SolverController()
     cnf = inst.generate()
-    #model = cnf[1]
-    solver.start(cnf, 50000, timeout_secs=40, verb=2)
+    solver.start(cnf, 50000, timeout_secs=40, verb=4)
+    print("started")
     for i in range(10):
         solver.step(solver.zero_scores())
 

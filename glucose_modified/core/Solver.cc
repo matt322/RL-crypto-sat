@@ -2114,40 +2114,50 @@ void Solver::writeCSRToSharedMem(bool onlyLearnts, int verb) { //writes crow_ind
     size_t col_bytes = col_indices.size() * sizeof(int);
     size_t total_bytes = header_bytes + crow_bytes + col_bytes;
 
-    std::string shm_name = "/csr_shared_mem_" + std::to_string(getpid());
-    int fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
-    printf("m shared_mem name %s\n", shm_name.c_str());
-    if (fd < 0) {
-        perror("shm_open");
-        exit(1);
-    }
-    if (ftruncate(fd, (off_t)total_bytes) != 0) {
-        perror("ftruncate");
-        exit(1);
-    }
-    void *ptr = mmap(nullptr, total_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (ptr == MAP_FAILED) {
-        perror("mmap");
-        exit(1);
-    }
-    char *p = (char*)ptr;
-    memcpy(p, &n_clauses, sizeof(int));
-    memcpy(p + sizeof(int), &n_vars, sizeof(int));
-    memcpy(p + 2 * sizeof(int), &nnz, sizeof(int));
-    memcpy(p + header_bytes, crow_indices.data(), crow_bytes);
-    memcpy(p + header_bytes + crow_bytes, col_indices.data(), col_bytes);
-    msync(ptr, total_bytes, MS_SYNC);
     auto writeTime = std::chrono::high_resolution_clock::now();
-    printf("m csr written %i\n", total_bytes);
 
-    std::string line;
-    if (getline(std::cin, line) && line == "m csr ack") {
-        munmap(ptr, total_bytes);
-        close(fd);
-        shm_unlink(shm_name.c_str());
-    } else {
-        throw std::runtime_error("No ack received after writing CSR to shared memory");
+    try {
+        std::string shm_name = "/csr_shared_mem_" + std::to_string(getpid());
+        int fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
+        printf("m shared_mem name %s\n", shm_name.c_str());
+        if (fd < 0) {
+            perror("shm_open");
+            exit(1);
+        }
+        if (ftruncate(fd, (off_t)total_bytes) != 0) {
+            perror("ftruncate");
+            exit(1);
+        }
+        void *ptr = mmap(nullptr, total_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (ptr == MAP_FAILED) {
+            perror("mmap");
+            exit(1);
+        }
+        char *p = (char*)ptr;
+        memcpy(p, &n_clauses, sizeof(int));
+        memcpy(p + sizeof(int), &n_vars, sizeof(int));
+        memcpy(p + 2 * sizeof(int), &nnz, sizeof(int));
+        memcpy(p + header_bytes, crow_indices.data(), crow_bytes);
+        memcpy(p + header_bytes + crow_bytes, col_indices.data(), col_bytes);
+        msync(ptr, total_bytes, MS_SYNC);
+        writeTime = std::chrono::high_resolution_clock::now();
+        printf("m csr written %i\n", total_bytes);
+
+        std::string line;
+        if (getline(std::cin, line) && line == "m csr ack") {
+            munmap(ptr, total_bytes);
+            close(fd);
+            shm_unlink(shm_name.c_str());
+        } else {
+            throw std::runtime_error("No ack received after writing CSR to shared memory");
+        }
+    } catch (const std::exception& e) {
+        fprintf(stderr, "Error: %s\n", e.what());
+        printf("c csr write error: %s\n", e.what());
+        exit(1);
     }
+
+
 
     auto ackTime = std::chrono::high_resolution_clock::now();
     if (verb > 0) {
