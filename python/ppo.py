@@ -49,8 +49,9 @@ class GNNPolicy(ActorCriticPolicy):
 
 
 if __name__ == "__main__":
+    callback = LoggingCallback("ppo_test.jsonl", save_freq=100, verbose=1)
     model = PPO(GNNPolicy, SolverEnv(), verbose=2)
-    model.learn(total_timesteps=10, progress_bar=True)
+    model.learn(total_timesteps=1000, progress_bar=True, callback=callback)
 
 
 

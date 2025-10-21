@@ -7,13 +7,13 @@ import torch
 
 def construct_sparse_tensor(obs):
         """
-        converts SB3 internal representation of observation into pt sparse tensor
+        converts SB3 internal representation of observation into pt sparse tensor, unpadding as necessary
         """
         return torch.sparse_csr_tensor(
-            crow_indices=obs["crow_indices"][:, :int(obs["nclauses"])+1].to(torch.int32).squeeze(), 
+            crow_indices=obs["crow_indices"][:, :int(obs["n_clauses"])+1].to(torch.int32).squeeze(), 
             col_indices=obs["col_indices"][:, :int(obs["nnz"])].to(torch.int32).squeeze(), 
             values=obs["values"][:, :int(obs["nnz"])].to(torch.float32).squeeze(), 
-            size=(int(obs["nclauses"]), int(obs["nlits"]))
+            size=(int(obs["n_clauses"]), int(obs["nlits"]))
         )
 
 class LoggingCallback(BaseCallback):
@@ -24,17 +24,14 @@ class LoggingCallback(BaseCallback):
     - Saves a sample policy output every 1000 steps
     """
 
-    def __init__(self, log_dir: str, save_freq: int = 1000, verbose: int = 1):
+    def __init__(self, log_name: str, save_freq: int = 1000, verbose: int = 1):
         super().__init__(verbose)
-        self.log_dir = log_dir
+        self.log_dir = "logs"
         self.save_freq = save_freq
         self.start_time = None
         self.episode_rewards = []
         self.last_logged_step = 0
-        os.makedirs(log_dir, exist_ok=True)
-
-        self.log_file = os.path.join(log_dir, "training_log.json")
-        # Initialize JSON log
+        self.log_file = os.path.join(self.log_dir, log_name)
         if not os.path.exists(self.log_file):
             with open(self.log_file, "w") as f:
                 json.dump({"steps": []}, f)

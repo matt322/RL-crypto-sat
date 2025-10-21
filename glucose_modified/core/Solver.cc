@@ -1588,10 +1588,13 @@ lbool Solver::search(int nof_conflicts) {
                 last_conflicts = conflicts;
                 last_decisions = decisions;
                 printf("m reward %f\n",  reward);
-                decisions++; // to avoid being called again at next iteration
+                fflush(stdout);
+                //decisions++; // to avoid being called again at next iteration
                 //writeClauses(true, 2);
-                writeCSRToSharedMem(true, 2);
-                waitForActivityScores();
+                if (decisions > 0) {
+                    writeCSRToSharedMem(true, 2);
+                    waitForActivityScores();
+                }
             }
 
 
@@ -2135,14 +2138,14 @@ void Solver::writeCSRToSharedMem(bool onlyLearnts, int verb) { //writes crow_ind
         }
         char *p = (char*)ptr;
         memcpy(p, &n_clauses, sizeof(int));
-        memcpy(p + sizeof(int), &n_vars, sizeof(int));
+        memcpy(p + sizeof(int), &n_lits, sizeof(int));
         memcpy(p + 2 * sizeof(int), &nnz, sizeof(int));
         memcpy(p + header_bytes, crow_indices.data(), crow_bytes);
         memcpy(p + header_bytes + crow_bytes, col_indices.data(), col_bytes);
         msync(ptr, total_bytes, MS_SYNC);
         writeTime = std::chrono::high_resolution_clock::now();
         printf("m csr written %i\n", total_bytes);
-
+        fflush(stdout);
         std::string line;
         if (getline(std::cin, line) && line == "m csr ack") {
             munmap(ptr, total_bytes);
@@ -2166,11 +2169,13 @@ void Solver::writeCSRToSharedMem(bool onlyLearnts, int verb) { //writes crow_ind
         printf("c shared memory ack time: %lldms\n",
             (long long)std::chrono::duration_cast<std::chrono::milliseconds>(ackTime - writeTime).count());
     }
+    fflush(stdout);
 
 }
 
 void Solver::waitForActivityScores() {
     printf("m activity start\n");
+    fflush(stdout);
     std::string line;
     while (getline(std::cin, line)) {
         if (line.empty()) continue;

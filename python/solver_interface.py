@@ -30,14 +30,13 @@ class SolverController:
             solverargs,
             stdin=subprocess.PIPE,      
             stdout=subprocess.PIPE,     
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             bufsize=1
         )
         if self.proc.stdin is None or self.proc.stdout is None:
             raise RuntimeError("Failed to open pipes to subprocess")
-        self.fixed_clauses = []
-        self.learnt_clauses = []
+        self.fixed_clauses = None
         self.reading_learnts = False
         self.total_learnts = 0
         self.total_fixed = 0
@@ -47,6 +46,7 @@ class SolverController:
 
         self.reader = self.proc.stdout
         self.writer = self.proc.stdin
+        self.err = self.proc.stderr
 
         for line in self.reader:
             line = line.strip()
@@ -67,6 +67,7 @@ class SolverController:
                     if self.verb > 1:
                         print(f"Reading CSR from shared memory: {self.shm_name}")
                     csr = self.read_from_shared_mem(self.shm_name)
+                    self.fixed_clauses = csr
                     return csr, 0, False, None, time.time() - self.start_time
             elif line.startswith("v "):
                 if self.verb > 1:
@@ -92,91 +93,69 @@ class SolverController:
 
     def step(self, activity_scores=None):
         """
-        - read chunks from solver stdout (binary)
-        - accumulate lines, parse only lines starting with b'l' or b'm'
-        - when 'm done' seen, invoke callback(clauses)
-        - write callback result (bytes/str) to solver stdin, flush
-        - repeat until solver exits or stop() called
-        returns: (learnt_clauses, reward, done, model, time since start)
+        What can happen: solver continues, finishes, or times out, in each case return proper observation
+        returns: (learnt obs object, reward, done, timed out, model, time since start)
         """
-        if self.proc is None:
+        if self.proc is None or self.is_finished():
             raise RuntimeError("Process not started; call start() first")
 
-        self.learnt_clauses = []
         self.total_learnts = 0
+        csr = None
+        reward = None
             
         reward = 0
         did_action = False
+        
 
         if time.time() - self.start_time > self.timeout_secs:
             if self.verb > 0:
                 print("Timeout reached, stopping solver")
             self.stop()
-            return self.learnt_clauses, reward, True, None, time.time() - self.start_time
+            return self.fixed_clauses, reward, True, True, None, time.time() - self.start_time
 
         for line in self.reader:
             line = line.strip()
-            
-            if line.startswith("l "):
-                if self.verb > 3:
-                    print(line)
-                clause = [int(x) for x in line.split()[1:]]
-                if self.reading_learnts:
-                    self.learnt_clauses.append(clause)
-                    self.total_learnts += 1
-                else:
-                    self.fixed_clauses.append(clause)
-                    self.total_fixed += 1
-
-            elif line.startswith("m "):
+            if line.startswith("m "):
                 if self.verb > 2:
                     print(line)
-                match line:
-                    case "m learnt done":
-                        if self.verb > 1:
-                            print(f"Read {self.total_learnts} learnt clauses")
-                        if did_action:
-                            return self.learnt_clauses, reward, False, None, time.time() - self.start_time                            
-                    case "m learnt start":
-                        self.total_learnts = 0
-                        self.reading_learnts = True
-                    case "m fixed done":
-                        raise RuntimeError("Unexpected 'm fixed done' during step; should only appear during start()")
-                    
-                    case "m activity start":
-                        if self.verb > 2:
-                            print("Calculating activities...")
-                        if activity_scores is None:
-                            raise RuntimeError("Activity scores expected but not provided")
-                        for i in activity_scores:
-                            self.writer.write(i + "\n")
-                        self.writer.write("m done\n")
-                        self.writer.flush()
-                        did_action = True
+                if line == "m activity start":
+                    if self.verb > 2:
+                        print("Calculating activities...")
+                    if activity_scores is None:
+                        raise RuntimeError("Activity scores expected but not provided")
+                    for i in activity_scores:
+                        self.writer.write(i + "\n")
+                    self.writer.write("m done\n")
+                    self.writer.flush()
+                    did_action = True
 
-                    case _:
-                        if line.startswith("m shared_mem name"):
-                            self.shm_name = line.split(" ")[3][1:]
-                        if line.startswith("m csr written"):
-                            csr = self.read_from_shared_mem(self.shm_name)
-                            if self.verb > 1:
-                                print(f"Read {csr["nclauses"]} clauses from shared memory")
-                            return csr, 0, False, None, time.time() - self.start_time
-                        if line.startswith("m reward "):
-                            reward = float(line.split(" ")[2])
-                        if self.verb > 2:
-                            print(f"Solver message: {line[2:]}")
+                elif line.startswith("m shared_mem name"):
+                    self.shm_name = line.split(" ")[3][1:]
+
+                elif line.startswith("m csr written"):
+                    csr = self.read_from_shared_mem(self.shm_name)
+                    if self.verb > 1:
+                        print(f"Read {csr["n_clauses"]} clauses from shared memory")
+    
+                elif line.startswith("m reward "):
+                    reward = float(line.split(" ")[2])
+                else:
+                    print(line)
+                    
             
-            elif line.startswith("v "):
+            elif line.startswith("v "): #solver found model
                 if self.verb > 1:
                     print(line)
                 self.stop()
-                return self.learnt_clauses, 100, True, line.split(" ")[1:], time.time() - self.start_time # solve reward
+                return self.fixed_clauses, 100, True, False, line.split(" ")[1:], time.time() - self.start_time # solve reward
 
             else:
                 if self.verb > 0:
                     print(line)
-        return self.learnt_clauses, 0, True, None, time.time() - self.start_time #process exited
+            if did_action and csr is not None and reward is not None:
+                return csr, reward, False, False, None, time.time() - self.start_time
+        print("Solver exited unexpectedly")
+        return self.fixed_clauses, 0, True, True, time.time() - self.start_time #process exited
 
 
     def read_from_shared_mem(self, shm_name):
@@ -206,7 +185,7 @@ class SolverController:
                 "col_indices": col_arr,
                 "values": np.ones(nnz, dtype=np.int32),
                 "nlits": n_lits,
-                "nclauses": n_clauses,
+                "n_clauses": n_clauses,
                 "nnz": nnz
             }
 
@@ -226,10 +205,9 @@ if __name__ == "__main__":
     inst = Instance(seed=41, rounds=21)
     solver = SolverController()
     cnf = inst.generate()
-    solver.start(cnf, 50000, timeout_secs=40, verb=4)
-    print("started")
-    for i in range(10):
-        solver.step(solver.zero_scores())
+    solver.start(cnf, 50000, timeout_secs=40, verb=0)
+    for i in range(100):
+        print(solver.step(solver.zero_scores())[1])
 
    
     
