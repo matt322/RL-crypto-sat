@@ -2118,9 +2118,9 @@ void Solver::writeCSRToSharedMem(bool onlyLearnts, int verb) { //writes crow_ind
     size_t total_bytes = header_bytes + crow_bytes + col_bytes;
 
     auto writeTime = std::chrono::high_resolution_clock::now();
-
+    std::string shm_name = "/csr_shared_mem_" + std::to_string(getpid());
     try {
-        std::string shm_name = "/csr_shared_mem_" + std::to_string(getpid());
+        
         int fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
         printf("m shared_mem name %s\n", shm_name.c_str());
         if (fd < 0) {
@@ -2152,9 +2152,13 @@ void Solver::writeCSRToSharedMem(bool onlyLearnts, int verb) { //writes crow_ind
             close(fd);
             shm_unlink(shm_name.c_str());
         } else {
+            munmap(ptr, total_bytes);
+            close(fd);
+            shm_unlink(shm_name.c_str());
             throw std::runtime_error("No ack received after writing CSR to shared memory");
         }
     } catch (const std::exception& e) {
+        shm_unlink(shm_name.c_str());
         fprintf(stderr, "Error: %s\n", e.what());
         printf("c csr write error: %s\n", e.what());
         exit(1);
@@ -2188,7 +2192,7 @@ void Solver::waitForActivityScores() {
             continue;
         }
         if (idx >= activity.size()) {
-            throw std::runtime_error("Invalid index in activity scores: " + std::to_string(idx));
+            throw std::runtime_error("Invalid index in activity scores: " + std::to_string(idx) + " (size: " + std::to_string(activity.size()) + ")");
         }
         activity[idx] = val;
     }

@@ -4,13 +4,12 @@ import shutil
 import subprocess
 
 class Instance:
-    def __init__(self, rounds=21, solver_path="glucose_modified/simp/glucose", seed=None):
+    def __init__(self, rounds=21, solver_path="glucose_modified/simp/glucose"):
         self.solver_path = solver_path
         self.cnf_path = f"cnf/sha1_{rounds}round.cnf"
         self.rounds = rounds
         self.nvars, self.nclauses = self.get_varcount(self.cnf_path)
         self.instancefile = f"cnf/instance_{self.rounds}_rounds_{len(os.listdir("cnf"))}.cnf"
-        random.seed(seed)
 
     def __del__(self):
         try:
@@ -47,12 +46,16 @@ class Instance:
         return self.sha1_pad(random_bits)
 
 
-    def generate(self, free_outputs=0, simplify=False):
+    def generate(self, free_outputs=0, simplify=False, seed=None):
         """
         Generate a new instance in the file associated to the object with variables revealed according to probability p
 
         Returns: (instancefile, solution, nvars, nclauses)
         """
+        if seed:
+            random.seed(seed)
+        else:
+            random.seed()
         assert 0 <= free_outputs <= 160, "160 output bits can be freed at most"
         inputs = list(range(1, 512+1))
         input_str = self.random_input()

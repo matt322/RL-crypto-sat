@@ -3,18 +3,144 @@ import json
 import time
 import numpy as np
 from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.buffers import RolloutBuffer
+from stable_baselines3.common.policies import ActorCriticPolicy
+from stable_baselines3.common.type_aliases import RolloutBufferSamples
 import torch
+import torch.nn as nn
+from gnn import rl_GNN1
+
 
 def construct_sparse_tensor(obs):
         """
         converts SB3 internal representation of observation into pt sparse tensor, unpadding as necessary
         """
-        return torch.sparse_csr_tensor(
-            crow_indices=obs["crow_indices"][:, :int(obs["n_clauses"])+1].to(torch.int32).squeeze(), 
-            col_indices=obs["col_indices"][:, :int(obs["nnz"])].to(torch.int32).squeeze(), 
-            values=obs["values"][:, :int(obs["nnz"])].to(torch.float32).squeeze(), 
-            size=(int(obs["n_clauses"]), int(obs["nlits"]))
+        if isinstance(obs, dict):
+            res = np.empty(1, dtype=object)
+            res[0] = torch.sparse_csr_tensor(
+                crow_indices=obs["crow_indices"][:, :int(obs["n_clauses"])+1].to(torch.int32).squeeze(), 
+                col_indices=obs["col_indices"][:, :int(obs["nnz"])].to(torch.int32).squeeze(), 
+                values=obs["values"][:, :int(obs["nnz"])].to(torch.float32).squeeze(), 
+                size=(int(obs["n_clauses"]), int(obs["nlits"]))
+            )
+        
+        else:
+            res = np.empty(obs.shape[0], dtype=object)
+            for i in range(obs.shape[0]):
+                res[i] = torch.sparse_csr_tensor(
+                    crow_indices=obs[i]["crow_indices"][:int(obs[i]["n_clauses"])+1].to(torch.int32).squeeze(), 
+                    col_indices=obs[i]["col_indices"][:int(obs[i]["nnz"])].to(torch.int32).squeeze(), 
+                    values=obs[i]["values"][:int(obs[i]["nnz"])].to(torch.float32).squeeze(), 
+                    size=(int(obs[i]["n_clauses"]), int(obs[i]["nlits"]))
+                )
+        return res
+
+
+class VariableRolloutBuffer(RolloutBuffer):
+    def __init__(self, buffer_size, observation_space, action_space, device = "auto", gae_lambda = 1, gamma = 0.99, n_envs = 1):
+        super().__init__(buffer_size, observation_space, action_space, device, gae_lambda, gamma, n_envs)
+
+    def reset(self):
+        self.observations = np.zeros((self.buffer_size, self.n_envs), dtype=object) # pointer based instead of np array
+        self.actions = np.zeros((self.buffer_size, self.n_envs, self.action_dim), dtype=np.float32)
+        self.rewards = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.returns = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.episode_starts = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.values = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.log_probs = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.advantages = np.zeros((self.buffer_size, self.n_envs), dtype=np.float32)
+        self.generator_ready = False
+        super(RolloutBuffer, self).reset()
+
+    def add(self, obs, action, reward, done, value, log_prob):
+        placeholder = np.zeros(1) 
+        super().add(placeholder, action, reward, done, value, log_prob)
+        self.observations[self.pos-1] = obs # pos incremented in super().add()
+
+    def _get_samples(
+        self,
+        batch_inds: np.ndarray,
+        env = None,
+    ):
+        data = (
+            self.actions[batch_inds],
+            self.values[batch_inds].flatten(),
+            self.log_probs[batch_inds].flatten(),
+            self.advantages[batch_inds].flatten(),
+            self.returns[batch_inds].flatten(),
         )
+        return RolloutBufferSamples(self.observations[batch_inds].squeeze(), *tuple(map(self.to_torch, data)))
+
+
+
+
+class GNNWrapper(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.gnn = rl_GNN1(**config)
+        self.latent_dim_pi = None 
+        self.latent_dim_vf = None
+        self.value_net = None
+        self.action_net = None
+
+    def forward(self, x):
+        #x = construct_sparse_tensor(x)
+        policy, value = torch.zeros(x.shape[0], self.latent_dim_pi), torch.zeros(x.shape[0], 1)
+        for i in range(x.shape[0]):
+            p, v = self.gnn(x[i])
+            policy[i], value[i] = p.squeeze(), torch.mean(v).unsqueeze(0)
+            
+        return policy, value
+    
+    def forward_actor(self, x):
+        policy, _ = self.forward(x)
+        return policy
+    
+    def forward_critic(self, x):
+        _, value = self.forward(x)
+        return value
+    
+    
+class ConstructModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return construct_sparse_tensor(x)
+
+
+class GNNPolicy(ActorCriticPolicy):
+    def __init__(self, *args, **kwargs):
+        kwargs["ortho_init"] = False
+        super().__init__(*args, **kwargs)
+
+    def _build_mlp_extractor(self) -> None:
+        config = {
+            "clause_dim":16,
+            "lit_dim":64,
+            "n_hops":4,
+            "n_layers_C_update":3,
+            "n_layers_L_update":3,
+            "n_layers_score":1,
+            "activation":"relu"
+        }
+        self.features_extractor = ConstructModule() #extract_features and these attributes are used inconsistently
+        self.vf_features_extractor = ConstructModule()
+        self.mlp_extractor = GNNWrapper(config)
+        self.mlp_extractor.latent_dim_pi = self.action_space.shape[0]
+        self.mlp_extractor.latent_dim_vf = 1
+
+
+    def _build(self, lr_schedule):
+        super()._build(lr_schedule)
+        self.value_net = nn.Identity()        
+        self.action_net = nn.Identity()
+
+    def extract_features(self, obs, features_extractor = None):
+        return construct_sparse_tensor(obs)
+    
+
+
 
 class LoggingCallback(BaseCallback):
     """
@@ -24,8 +150,9 @@ class LoggingCallback(BaseCallback):
     - Saves a sample policy output every 1000 steps
     """
 
-    def __init__(self, log_name: str, save_freq: int = 1000, verbose: int = 1):
+    def __init__(self, log_name: str, save_freq: int = 1000, verbose: int = 1, stepfns = []):
         super().__init__(verbose)
+        self.stepfns = stepfns
         self.log_dir = "logs"
         self.save_freq = save_freq
         self.start_time = None
@@ -41,6 +168,8 @@ class LoggingCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         # Record reward if available
+        for i in self.stepfns:
+            print(i())
         rewards = self.locals.get("rewards")
         if rewards is not None:
             self.episode_rewards.append(float(np.mean(rewards)))
@@ -77,20 +206,21 @@ class LoggingCallback(BaseCallback):
         self.episode_rewards.clear()
 
     def _save_model_and_policy(self):
+        pass
         # Save model
-        model_path = os.path.join(self.log_dir, f"model_{self.num_timesteps}.zip")
-        self.model.save(model_path)
+        #model_path = os.path.join(self.log_dir, f"model_{self.num_timesteps}.zip")
+        #self.model.save(model_path)
 
         # Sample policy output
-        try:
-            obs = self.training_env.observation_space.sample()
-            action, _ = self.model.predict(obs, deterministic=True)
-            policy_path = os.path.join(self.log_dir, f"policy_{self.num_timesteps}.json")
-            with open(policy_path, "w") as f:
-                json.dump({"obs": obs.tolist(), "action": action.tolist()}, f, indent=2)
-        except Exception as e:
-            if self.verbose > 0:
-                print(f"[LoggingCallback] Policy output save failed at step {self.num_timesteps}: {e}")
+        # try:
+        #     obs = self.training_env.observation_space.sample()
+        #     action, _ = self.model.predict(obs, deterministic=True)
+        #     policy_path = os.path.join(self.log_dir, f"policy_{self.num_timesteps}.json")
+        #     with open(policy_path, "w") as f:
+        #         json.dump({"obs": obs.tolist(), "action": action.tolist()}, f, indent=2)
+        # except Exception as e:
+        #     if self.verbose > 0:
+        #         print(f"[LoggingCallback] Policy output save failed at step {self.num_timesteps}: {e}")
 
-        if self.verbose > 0:
-            print(f"[LoggingCallback] Saved model and policy at step {self.num_timesteps}")
+        # if self.verbose > 0:
+        #     print(f"[LoggingCallback] Saved model and policy at step {self.num_timesteps}")

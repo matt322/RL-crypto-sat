@@ -12,18 +12,20 @@ def extract(file, condition):
                 res.append(line["time"])
     return res
 
-def cumulative_plot(times, max=200):
-    times = sorted(times)
-    n = len(times)
-    timeout_count = times.count(max)
-    non_timeout_count = n - timeout_count
+def cumulative_plot(data, xmax=200):
+    plt.figure()
+    
+    for label, times, max in data:
+        times = sorted(times)
+        n = len(times)
+        timeout_count = times.count(max)
+        non_timeout_count = n - timeout_count
 
-    cumulative_percentages = [(i / non_timeout_count) * 100 for i in range(non_timeout_count + 1)]
-    cumulative_times = [t for t in times if t < max] + [max]
+        cumulative_percentages = [(i / n) * 100 for i in range(n)]
 
-    plt.plot(cumulative_times, cumulative_percentages, marker='o')
-    plt.axhline(y=(non_timeout_count / n) * 100, color='r', linestyle='--', label='Non-timeout percentage')
-    plt.xlim(0, max)
+        plt.plot(times[:non_timeout_count], cumulative_percentages[:non_timeout_count], marker='o', label=label, markersize=3)
+
+    plt.xlim(0, xmax)
     plt.ylim(0, 100)
     plt.xlabel('Time')
     plt.ylabel('% of Instances Solved')
@@ -92,14 +94,38 @@ def var_viz(cnf, values):
 
 
 if __name__ == "__main__":
-    times = extract("logs/avg_solvetime_log.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 0)
-    plt.hist(times, bins=20, range=(0, 200))
-    plt.xlabel('Time')
-    plt.ylabel('% of Instances Solved')
+    basetimes = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 0)
+   # reset_times = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] != 0 and x["free_outputs"] == 0)
+    times_16 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 16)
+    times_32 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 32)
+    times_64 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 64)
+    times_128 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 128)
+    times_96 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 96)
+   # times_64 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 64)
+
+    cumulative_plot([
+        ("0 Free Outputs", basetimes, 200),
+        ("16 Free Outputs", times_16, 200),
+        ("32 Free Outputs", times_32, 200),
+       ("64 Free Outputs", times_64, 200),
+        ("128 Free Outputs", times_128, 200),
+       ("96 Free Outputs", times_96, 200),
+
+    ], xmax=200)
+
+    with open("logs/episode_log.jsonl", 'r') as f:
+        reward_plots = [json.loads(i)["rewards"] for i in f.readlines()]
+    
+    
+    for i in reward_plots:
+        plt.plot(range(1,len(i)-1), i[1:-1])
+    plt.xlabel("Steps")
+    plt.ylabel("Reward")
+    plt.title("Step rewards for several episodes")
     plt.show()
-    times = extract("logs/avg_solvetime_log.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 64)
-    plt.hist(times, bins=20, range=(0, 100))
-    plt.xlabel('Time')
-    plt.ylabel('% of Instances Solved')
-    plt.show()
+    
+    with open("logs/episode_log.jsonl", 'r') as f:
+        example_action = json.loads(f.readlines()[1])["first_action"]
+    var_viz("cnf/sha1_21round.cnf", example_action)
+
     

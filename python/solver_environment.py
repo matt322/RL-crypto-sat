@@ -4,21 +4,24 @@ import numpy as np
 from solver_interface import SolverController
 from instance_generation import Instance
 import json
+import gc
 
 class SolverEnv(gym.Env):
-    def __init__(self, rounds=21, free_outputs=0, single_inst=False):
+    def __init__(self, rounds=21, free_outputs=0, single_inst=False, verb=0, logfile="logs/episode_log.jsonl"):
         super().__init__()
         self.free_outputs = free_outputs
+        self.verb = verb
         self.single_inst = single_inst
         self.sha1_instance = Instance(rounds=rounds)
         self.nvars = self.sha1_instance.nvars
         self.max_clauses = 200_000 #most ive observed is around 150k
         self.solver = SolverController()
         self.action_space = Box(low=-1, high=1, shape=(self.nvars,), dtype=np.float32) #neurocore outputs a prob dist over variables and scales by nvars * 10e4
-        self.max_nnz = 5_000_000
+        self.max_nnz = 20_000_000
         self.episode_log_dict = {}
-        self.episode_log_file = "logs/episode_log.jsonl"
-        
+        self.episode_log_file = logfile
+        self.global_stepcount = 0
+        self.score_multiplier = 1e4 * self.nvars
          #these will need to be tuned in the future since they directly affect memory usage
         # SB3 needs finite bounds, for now we will let it clip without changing the gnn. 
         #Observation space: in the GNN we have G @ V where G is Nclauses x Nlits "adjacency matrix" and V is Nlits x features
@@ -43,14 +46,11 @@ class SolverEnv(gym.Env):
         self.episode_log_dict = {}
         self.episode_log_dict["seed"] = seed
         self.episode_log_dict["steps"] = 0
+        self.episode_log_dict["first_action"] = None
         super().reset(seed=seed)
-        if seed:
-            self.sha1_instance = Instance(rounds=self.sha1_instance.rounds, seed=seed)
-        if self.single_inst:
-            self.sha1_instance = Instance(rounds=self.sha1_instance.rounds, seed=41)
-        self.cnf = self.sha1_instance.generate(self.free_outputs)
-        self.fixed_obj, reward, done, _, init_time = self.solver.start(self.cnf, decisions_per_callback=50000, timeout_secs=200, verb=4)
-        self.episode_log_dict["sum_rewards"] = reward
+        self.cnf = self.sha1_instance.generate(self.free_outputs, seed=42 if self.single_inst else seed)
+        self.fixed_obj, reward, done, _, init_time = self.solver.start(self.cnf, decisions_per_callback=50000, timeout_secs=200, verb=self.verb)
+        self.episode_log_dict["rewards"] = [reward]
         self.episode_log_dict["truncated"] = False
         self.episode_log_dict["max_nnz"] = 0
 
@@ -59,10 +59,14 @@ class SolverEnv(gym.Env):
 
 
     def step(self, action):
-        learnt, reward, done, truncated, model, time = self.solver.step(activity_scores=[f"{i+1} {score}" for i, score in enumerate(action)])
+        self.global_stepcount += 1
+        print(self.global_stepcount)
+        learnt, reward, done, truncated, model, time = self.solver.step(activity_scores=[f"{i} {score * self.score_multiplier}" for i, score in enumerate(action)])
         self.episode_log_dict["steps"] += 1
-        self.episode_log_dict["sum_rewards"] += reward
+        self.episode_log_dict["rewards"].append(reward)
         self.episode_log_dict["truncated"] = truncated
+        if self.episode_log_dict["first_action"] is None:
+            self.episode_log_dict["first_action"] = list(map(lambda x: round(float(x), 4), action))
         obs = self.get_obs(learnt)
         self.episode_log_dict["max_nnz"] = max(self.episode_log_dict["max_nnz"], obs["nnz"])
         return obs, reward, done, truncated, {"step time": time}
@@ -88,7 +92,7 @@ class SolverEnv(gym.Env):
             obs["nnz"] = int(a["nnz"]) + int(b["nnz"])
         
         if obs["n_clauses"] > self.max_clauses or obs["nnz"] > self.max_nnz:
-            raise ValueError("Observation exceeds maximum size limits")
+            raise ValueError(f"Observation exceeds maximum size limits: {obs['n_clauses']} clauses, {obs['nnz']} nnz")
         obs["crow_indices"] = np.pad(obs["crow_indices"], (0, self.max_clauses + 1 - len(obs["crow_indices"])), 'constant') #doesnt matter what we pad with it will be removed
         obs["col_indices"] = np.pad(obs["col_indices"], (0, self.max_nnz - len(obs["col_indices"])), 'constant')
         obs["values"] = np.pad(obs["values"], (0, self.max_nnz - len(obs["values"])), 'constant') 
@@ -96,12 +100,13 @@ class SolverEnv(gym.Env):
     
  
 if __name__ == "__main__":
-    env = SolverEnv()
-    obs, info = env.reset(seed=42)
-    done = False
-    while not done:
-        obs, reward, done, truncated, info = env.step(np.zeros(env.nvars))
-        print(f"Reward: {reward}, Done: {done}, Truncated: {truncated}, Info: {info}")
+    env = SolverEnv(free_outputs=128)
+    for i in range(100):
+        obs, info = env.reset(seed=42)
+        done = False
+        while not done:
+            obs, reward, done, truncated, info = env.step(np.zeros(env.nvars))
+            print(f"wasted mem ratio: {1-obs["nnz"]/env.max_nnz}")
     
    
     

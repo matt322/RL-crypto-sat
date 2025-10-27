@@ -52,21 +52,15 @@ class SolverController:
             line = line.strip()
             if self.verb > 3:
                 print(line)
-            if line.startswith("l "):
-                clause = [int(x) for x in line.split()[1:]]
-                self.fixed_clauses.append(clause)
-                self.total_fixed += 1
-            elif line.startswith("m "):
-                if line == "m fixed done":
-                    if self.verb > 0:
-                        print(f"Read {self.total_fixed} fixed clauses")
-                    break
+            if line.startswith("m "):
                 if line.startswith("m shared_mem name"):
                     self.shm_name = line.split(" ")[3][1:]
                 if line.startswith("m csr written"):
                     if self.verb > 1:
                         print(f"Reading CSR from shared memory: {self.shm_name}")
                     csr = self.read_from_shared_mem(self.shm_name)
+                    if self.verb > 1:
+                        print(f"Read {csr['n_clauses']} clauses from shared memory")
                     self.fixed_clauses = csr
                     return csr, 0, False, None, time.time() - self.start_time
             elif line.startswith("v "):
@@ -105,13 +99,14 @@ class SolverController:
             
         reward = 0
         did_action = False
+        start_step_time = time.time()
         
 
         if time.time() - self.start_time > self.timeout_secs:
             if self.verb > 0:
                 print("Timeout reached, stopping solver")
             self.stop()
-            return self.fixed_clauses, reward, True, True, None, time.time() - self.start_time
+            return self.fixed_clauses, reward, True, True, None, time.time() - start_step_time
 
         for line in self.reader:
             line = line.strip()
@@ -147,22 +142,24 @@ class SolverController:
                 if self.verb > 1:
                     print(line)
                 self.stop()
-                return self.fixed_clauses, 100, True, False, line.split(" ")[1:], time.time() - self.start_time # solve reward
+                return self.fixed_clauses, 10, True, False, line.split(" ")[1:], time.time() - start_step_time # solve reward
 
             else:
                 if self.verb > 0:
                     print(line)
             if did_action and csr is not None and reward is not None:
-                return csr, reward, False, False, None, time.time() - self.start_time
-        print("Solver exited unexpectedly")
-        return self.fixed_clauses, 0, True, True, time.time() - self.start_time #process exited
+                return csr, reward, False, False, None, time.time() - start_step_time
+        print(f"Solver exited unexpectedly: poll returned {self.proc.poll()}")
+        for errline in self.err:
+            print(f"ERR: {errline.strip()}")
+        return self.fixed_clauses, 0, True, True, None, time.time() - start_step_time #process exited
 
 
     def read_from_shared_mem(self, shm_name):
         shm = shared_memory.SharedMemory(name=shm_name)
         buf = shm.buf
 
-        header = np.frombuffer(buf, dtype=np.int32, count=3, offset=0)
+        header = np.frombuffer(buf, dtype=np.int32, count=3, offset=0).copy()
         n_clauses = int(header[0])
         n_lits = int(header[1])
         nnz = int(header[2])
@@ -178,7 +175,7 @@ class SolverController:
 
         self.writer.write("m csr ack\n")
         self.writer.flush()
-        resource_tracker.unregister(shm._name, "shared_memory")
+        #resource_tracker.unregister(shm.name, "shared_memory")
         shm.close()
 
         return {"crow_indices": crow_arr,
@@ -202,9 +199,9 @@ def verify_cnf():
 
 
 if __name__ == "__main__":
-    inst = Instance(seed=41, rounds=21)
+    inst = Instance(rounds=21)
     solver = SolverController()
-    cnf = inst.generate()
+    cnf = inst.generate(seed=41)
     solver.start(cnf, 50000, timeout_secs=40, verb=0)
     for i in range(100):
         print(solver.step(solver.zero_scores())[1])
