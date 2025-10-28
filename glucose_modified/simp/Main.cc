@@ -143,6 +143,7 @@ int main(int argc, char** argv)
          BoolOption    opt_vbyte             (_certified, "vbyte",    "Emit proof in variable-byte encoding", false);
 
         IntOption opt_decisions("MAIN", "decisions", "Limit the number of decisions (0 for no limit)", 0, IntRange(0, INT32_MAX));
+        BoolOption opt_simplify_clauses("MAIN", "simplify_clauses", "Simplify clauses during search", false);
 
         parseOptions(argc, argv, true);
 
@@ -150,6 +151,7 @@ int main(int argc, char** argv)
         double      initial_time = cpuTime();
 
         S.decision_limit = opt_decisions;
+        S.simplify_clauses = opt_simplify_clauses;
 
         S.parsing = 1;
         S.use_simplification = pre;

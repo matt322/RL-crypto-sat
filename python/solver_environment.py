@@ -7,9 +7,11 @@ import json
 import gc
 
 class SolverEnv(gym.Env):
-    def __init__(self, rounds=21, free_outputs=0, single_inst=False, verb=0, logfile="logs/episode_log.jsonl"):
+    def __init__(self, rounds=21, decisions_per_callback=50000, free_outputs=0, single_inst=False, simplify_graph=False, verb=0, logfile="logs/episode_log.jsonl"):
         super().__init__()
         self.free_outputs = free_outputs
+        self.decisions_per_callback = decisions_per_callback
+        self.simplify_graph = simplify_graph
         self.verb = verb
         self.single_inst = single_inst
         self.sha1_instance = Instance(rounds=rounds)
@@ -49,12 +51,20 @@ class SolverEnv(gym.Env):
         self.episode_log_dict["first_action"] = None
         super().reset(seed=seed)
         self.cnf = self.sha1_instance.generate(self.free_outputs, seed=42 if self.single_inst else seed)
-        self.fixed_obj, reward, done, _, init_time = self.solver.start(self.cnf, decisions_per_callback=50000, timeout_secs=200, verb=self.verb)
+
+        obs, reward, done, _, init_time = self.solver.start(
+            self.cnf, 
+            decisions_per_callback=self.decisions_per_callback, 
+            timeout_secs=200, 
+            verb=self.verb,
+            simplify_clauses=self.simplify_graph,
+        )
+
         self.episode_log_dict["rewards"] = [reward]
         self.episode_log_dict["truncated"] = False
         self.episode_log_dict["max_nnz"] = 0
 
-        return self.get_obs(), {"init time":init_time} #initial observation has no learnt clauses, fixed clauses added in method (whatever)
+        return self.get_obs(obs), {"init time":init_time} #initial observation has no learnt clauses, fixed clauses added in method (whatever)
 
 
 
@@ -71,42 +81,21 @@ class SolverEnv(gym.Env):
         self.episode_log_dict["max_nnz"] = max(self.episode_log_dict["max_nnz"], obs["nnz"])
         return obs, reward, done, truncated, {"step time": time}
     
-    def get_obs(self, learnt_obj=None): #obs comes in as dict of np arrays
-        obs = {}
-        if learnt_obj is None:
-            for key in ["crow_indices", "col_indices", "values"]:
-                obs[key] = self.fixed_obj[key].copy()
-            for key in ["nlits", "n_clauses", "nnz"]:
-                obs[key] = int(self.fixed_obj[key])
-        else:
-            a = self.fixed_obj
-            b = learnt_obj
-            
-            if a["nlits"] != b["nlits"]:
-                raise ValueError("Incompatible Observations")  
-            obs["crow_indices"] = np.concatenate([a["crow_indices"][:int(a["n_clauses"])+1], b["crow_indices"][1:] + int(a["nnz"])])
-            obs["col_indices"] = np.concatenate([a["col_indices"][:int(a["nnz"])], b["col_indices"]])
-            obs["values"] = np.concatenate([a["values"][:int(a["nnz"])], b["values"]])
-            obs["nlits"] = int(a["nlits"])
-            obs["n_clauses"] = int(a["n_clauses"]) + int(b["n_clauses"])
-            obs["nnz"] = int(a["nnz"]) + int(b["nnz"])
-        
+    def get_obs(self, obs): #obs comes in as dict of np arrays, need to handle truncating
         if obs["n_clauses"] > self.max_clauses or obs["nnz"] > self.max_nnz:
             raise ValueError(f"Observation exceeds maximum size limits: {obs['n_clauses']} clauses, {obs['nnz']} nnz")
-        obs["crow_indices"] = np.pad(obs["crow_indices"], (0, self.max_clauses + 1 - len(obs["crow_indices"])), 'constant') #doesnt matter what we pad with it will be removed
-        obs["col_indices"] = np.pad(obs["col_indices"], (0, self.max_nnz - len(obs["col_indices"])), 'constant')
-        obs["values"] = np.pad(obs["values"], (0, self.max_nnz - len(obs["values"])), 'constant') 
         return obs
     
  
 if __name__ == "__main__":
-    env = SolverEnv(free_outputs=128)
+    env = SolverEnv(free_outputs=128, decisions_per_callback=10000)
     for i in range(100):
         obs, info = env.reset(seed=42)
+        print(info)
         done = False
         while not done:
             obs, reward, done, truncated, info = env.step(np.zeros(env.nvars))
-            print(f"wasted mem ratio: {1-obs["nnz"]/env.max_nnz}")
+            print(f"time: {info}")
     
    
     

@@ -18,11 +18,13 @@ class SolverController:
         self.proc = None
         self._stop = False
         
-    def start(self, cnf_inst, decisions_per_callback=200000, timeout_secs=2**31, args = [], verb=0):
+    def start(self, cnf_inst, decisions_per_callback=200000, simplify_clauses=False, timeout_secs=2**31, args = [], verb=0):
         self.verb=verb
         self._stop = False
         self.inst = cnf_inst
         solverargs = [self.solver_path, cnf_inst[0], "-model", f"-decisions={decisions_per_callback}", f"-verb={0 if self.verb < 2 else 1}"]
+        if simplify_clauses:
+            solverargs.append("-simplify_clauses")
         if timeout_secs < 2**31:
             solverargs.append(f"-cpu-lim={timeout_secs}")
         solverargs.extend(args)
@@ -36,10 +38,7 @@ class SolverController:
         )
         if self.proc.stdin is None or self.proc.stdout is None:
             raise RuntimeError("Failed to open pipes to subprocess")
-        self.fixed_clauses = None
-        self.reading_learnts = False
-        self.total_learnts = 0
-        self.total_fixed = 0
+       
         self.start_time = time.time()
         self.timeout_secs = timeout_secs
         self.log = []
@@ -67,11 +66,9 @@ class SolverController:
                 if self.verb > 1:
                     print(line)
                 self.stop()
-                return self.fixed_clauses, 100, True, line.split(" ")[1:], time.time() - self.start_time 
+                return None, 10, True, False, line.split(" ")[1:], time.time() - self.start_time 
         self.stop()
-        return self.fixed_clauses, 0, True, None, time.time() - self.start_time
-                
-
+        return None, 0, True, False, None, time.time() - self.start_time
         
 
     def stop(self):
@@ -106,7 +103,7 @@ class SolverController:
             if self.verb > 0:
                 print("Timeout reached, stopping solver")
             self.stop()
-            return self.fixed_clauses, reward, True, True, None, time.time() - start_step_time
+            return None, reward, True, True, None, time.time() - start_step_time
 
         for line in self.reader:
             line = line.strip()
@@ -142,7 +139,7 @@ class SolverController:
                 if self.verb > 1:
                     print(line)
                 self.stop()
-                return self.fixed_clauses, 10, True, False, line.split(" ")[1:], time.time() - start_step_time # solve reward
+                return None, 10, True, False, line.split(" ")[1:], time.time() - start_step_time # solve reward
 
             else:
                 if self.verb > 0:
@@ -152,7 +149,7 @@ class SolverController:
         print(f"Solver exited unexpectedly: poll returned {self.proc.poll()}")
         for errline in self.err:
             print(f"ERR: {errline.strip()}")
-        return self.fixed_clauses, 0, True, True, None, time.time() - start_step_time #process exited
+        return None, 0, True, True, None, time.time() - start_step_time #process exited
 
 
     def read_from_shared_mem(self, shm_name):

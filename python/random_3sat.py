@@ -1,5 +1,5 @@
 import random
-nvars= 100
+nvars= 10
 nc = int(nvars * 4.5)
 
 def lit(*exc):

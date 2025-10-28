@@ -6,9 +6,11 @@ from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import RolloutBufferSamples
+from stable_baselines3.common.vec_env.dummy_vec_env import DummyVecEnv
 import torch
 import torch.nn as nn
 from gnn import rl_GNN1
+import yappi
 
 
 def construct_sparse_tensor(obs):
@@ -16,23 +18,19 @@ def construct_sparse_tensor(obs):
         converts SB3 internal representation of observation into pt sparse tensor, unpadding as necessary
         """
         if isinstance(obs, dict):
-            res = np.empty(1, dtype=object)
-            res[0] = torch.sparse_csr_tensor(
-                crow_indices=obs["crow_indices"][:, :int(obs["n_clauses"])+1].to(torch.int32).squeeze(), 
-                col_indices=obs["col_indices"][:, :int(obs["nnz"])].to(torch.int32).squeeze(), 
-                values=obs["values"][:, :int(obs["nnz"])].to(torch.float32).squeeze(), 
-                size=(int(obs["n_clauses"]), int(obs["nlits"]))
+            obs = np.array([obs], dtype=object)
+        res = np.empty(obs.shape[0], dtype=object)
+        for i in range(obs.shape[0]):
+            res[i] = torch.sparse_csr_tensor(
+                # crow_indices=torch.tensor(obs[i]["crow_indices"][:, :int(obs[i]["n_clauses"])+1], dtype=torch.int32).squeeze(), 
+                # col_indices=torch.tensor(obs[i]["col_indices"][:, :int(obs[i]["nnz"])], dtype=torch.int32).squeeze(), 
+                # values=torch.tensor(obs[i]["values"][:, :int(obs[i]["nnz"])], dtype=torch.float32).squeeze(), 
+                # size=(int(obs[i]["n_clauses"]), int(obs[i]["nlits"]))
+                crow_indices=torch.tensor(obs[i]["crow_indices"], dtype=torch.int32), 
+                col_indices=torch.tensor(obs[i]["col_indices"], dtype=torch.int32), 
+                values=torch.tensor(obs[i]["values"], dtype=torch.float32), 
+                size=(int(obs[i]["n_clauses"]), int(obs[i]["nlits"]))
             )
-        
-        else:
-            res = np.empty(obs.shape[0], dtype=object)
-            for i in range(obs.shape[0]):
-                res[i] = torch.sparse_csr_tensor(
-                    crow_indices=obs[i]["crow_indices"][:int(obs[i]["n_clauses"])+1].to(torch.int32).squeeze(), 
-                    col_indices=obs[i]["col_indices"][:int(obs[i]["nnz"])].to(torch.int32).squeeze(), 
-                    values=obs[i]["values"][:int(obs[i]["nnz"])].to(torch.float32).squeeze(), 
-                    size=(int(obs[i]["n_clauses"]), int(obs[i]["nlits"]))
-                )
         return res
 
 
@@ -72,6 +70,33 @@ class VariableRolloutBuffer(RolloutBuffer):
         return RolloutBufferSamples(self.observations[batch_inds].squeeze(), *tuple(map(self.to_torch, data)))
 
 
+class ObjectVecEnv(DummyVecEnv): #doesn't support paralellism
+    """
+    A version of DummyVecEnv that supports arbitrary (object-type)
+    observations — for example, dicts containing variable-sized arrays
+    or sparse tensors.
+    """
+    def __init__(self, env_fns):
+        super().__init__(env_fns)
+        # Replace the numeric buffers with object buffers
+        self.buf_obs = np.empty((self.num_envs,), dtype=object)
+
+    def reset(self):
+        for i, env in enumerate(self.envs):
+            obs_i, info = env.reset()
+            self._save_obs(i, obs_i)  
+        return self.buf_obs[0]
+
+    def _save_obs(self, env_idx, obs):
+        # override to avoid type mismatch in DummyVecEnv
+        self.buf_obs[env_idx] = obs
+
+    def step_wait(self):
+        results = [env.step(a) for env, a in zip(self.envs, self.actions)]
+        obs, rews, dones, truncs, infos = zip(*results)
+        for i in range(self.num_envs):
+            self.buf_obs[i] = obs[i]
+        return self.buf_obs[0], np.array(rews), np.array(dones), list(infos)
 
 
 class GNNWrapper(nn.Module):
@@ -165,6 +190,7 @@ class LoggingCallback(BaseCallback):
 
     def _on_training_start(self):
         self.start_time = time.time()
+        yappi.start()
 
     def _on_step(self) -> bool:
         # Record reward if available
@@ -204,6 +230,10 @@ class LoggingCallback(BaseCallback):
             print(f"[LoggingCallback] Step {self.num_timesteps}: mean_reward={data['mean_reward']:.3f}, time={step_time:.3f}s")
 
         self.episode_rewards.clear()
+
+    
+    def _on_rollout_start(self):
+        yappi.get_func_stats().print_all()
 
     def _save_model_and_policy(self):
         pass

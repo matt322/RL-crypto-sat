@@ -139,6 +139,8 @@ Solver::Solver() :
 // Parameters (user settable):
 //
 decision_limit(0)
+, simplify_clauses(false)
+
 , verbosity(0)
 , showModel(0)
 , K(opt_K)
@@ -303,6 +305,7 @@ Solver::Solver(const Solver &s) :
 //MODIFICATIONS
 
 , decision_limit(s.decision_limit)
+, simplify_clauses(s.simplify_clauses)
 {
     // Copy clauses.
     s.ca.copyTo(ca);
@@ -1592,7 +1595,7 @@ lbool Solver::search(int nof_conflicts) {
                 //decisions++; // to avoid being called again at next iteration
                 //writeClauses(true, 2);
                 if (decisions > 0) {
-                    writeCSRToSharedMem(true, 2);
+                    writeCSRToSharedMem(2);
                     waitForActivityScores();
                 }
             }
@@ -2088,29 +2091,36 @@ void Solver::writeClauses(bool onlyLearnts, int verb) {
     }
 }
 
-void Solver::writeCSRToSharedMem(bool onlyLearnts, int verb) { //writes crow_indices and col_indices to shared memory. Values and padding done in python
+void Solver::writeCSRToSharedMem(int verb) { //writes crow_indices and col_indices to shared memory. Values and padding done in python
     std::vector<int> crow_indices = {0};
     std::vector<int> col_indices;
+
+    bool simplified = simplify_clauses;
     
     auto start = std::chrono::high_resolution_clock::now();
-    vec<CRef>& outputClauses = onlyLearnts ? learnts : clauses;
-    std::string clause_type = onlyLearnts ? "learnt" : "fixed";
     int totallits = 0;
     int n_vars = nVars();
     int n_lits = 2 * n_vars;
-    int n_clauses = outputClauses.size();
+    int n_clauses = clauses.size();
 
     for (int i = 0; i < n_clauses; i++) {
-        const Clause& c = ca[outputClauses[i]];
+        const Clause& c = ca[clauses[i]];
+        if (simplified && satisfied(c)) {
+            continue;
+        }
         int clause_size = c.size();
-        crow_indices.push_back(clause_size + crow_indices.back());
         for (int j = 0; j < clause_size; j++) {
+            if (simplified && value(c[j]) != l_Undef) {
+                continue;
+            }
             totallits++;
             int lit_idx = var(c[j]) + n_vars * sign(c[j]); // ~x gets idx (x-1) + nvars
             col_indices.push_back(lit_idx);
         }
+        crow_indices.push_back(totallits);
     }
     int nnz = col_indices.size();
+    n_clauses = crow_indices.size();
 
     size_t header_bytes = 3 * sizeof(int);
     size_t crow_bytes = crow_indices.size() * sizeof(int);
