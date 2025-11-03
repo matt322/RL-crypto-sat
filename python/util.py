@@ -7,6 +7,7 @@ from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.policies import ActorCriticPolicy
 from stable_baselines3.common.type_aliases import RolloutBufferSamples
 from stable_baselines3.common.vec_env.dummy_vec_env import DummyVecEnv
+from gymnasium import spaces
 import torch
 import torch.nn as nn
 from gnn import rl_GNN1
@@ -35,8 +36,9 @@ def construct_sparse_tensor(obs):
 
 
 class VariableRolloutBuffer(RolloutBuffer):
-    def __init__(self, buffer_size, observation_space, action_space, device = "auto", gae_lambda = 1, gamma = 0.99, n_envs = 1):
+    def __init__(self, buffer_size, observation_space, action_space, device = "cuda" if torch.cuda.is_available() else "cpu", gae_lambda = 1, gamma = 0.99, n_envs = 1):
         super().__init__(buffer_size, observation_space, action_space, device, gae_lambda, gamma, n_envs)
+        
 
     def reset(self):
         self.observations = np.zeros((self.buffer_size, self.n_envs), dtype=object) # pointer based instead of np array
@@ -67,10 +69,11 @@ class VariableRolloutBuffer(RolloutBuffer):
             self.advantages[batch_inds].flatten(),
             self.returns[batch_inds].flatten(),
         )
-        return RolloutBufferSamples(self.observations[batch_inds].squeeze(), *tuple(map(self.to_torch, data)))
+        return RolloutBufferSamples(self.observations[batch_inds].squeeze(), *tuple(map(self.to_torch, data))) #observations dict still on cpu
+    
 
 
-class ObjectVecEnv(DummyVecEnv): #doesn't support paralellism
+class ObjectVecEnv(DummyVecEnv):
     """
     A version of DummyVecEnv that supports arbitrary (object-type)
     observations — for example, dicts containing variable-sized arrays
@@ -96,6 +99,10 @@ class ObjectVecEnv(DummyVecEnv): #doesn't support paralellism
         obs, rews, dones, truncs, infos = zip(*results)
         for i in range(self.num_envs):
             self.buf_obs[i] = obs[i]
+            if dones[i] or truncs[i]:
+                maybe_options = {"options": self._options[i]} if self._options[i] else {}
+                obs_i, self.reset_infos[i] = self.envs[i].reset(seed=self._seeds[i], **maybe_options)
+                self.buf_obs[i] = obs_i
         return self.buf_obs[0], np.array(rews), np.array(dones), list(infos)
 
 
@@ -107,12 +114,16 @@ class GNNWrapper(nn.Module):
         self.latent_dim_vf = None
         self.value_net = None
         self.action_net = None
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"GNN using device: {self.device}")
+        self.gnn = self.gnn.to(self.device)
 
     def forward(self, x):
         #x = construct_sparse_tensor(x)
-        policy, value = torch.zeros(x.shape[0], self.latent_dim_pi), torch.zeros(x.shape[0], 1)
+       
+        policy, value = torch.zeros(x.shape[0], self.latent_dim_pi, device=self.device), torch.zeros(x.shape[0], 1, device=self.device)
         for i in range(x.shape[0]):
-            p, v = self.gnn(x[i])
+            p, v = self.gnn(x[i].to(self.device))
             policy[i], value[i] = p.squeeze(), torch.mean(v).unsqueeze(0)
             
         return policy, value
@@ -132,6 +143,8 @@ class ConstructModule(nn.Module):
 
     def forward(self, x):
         return construct_sparse_tensor(x)
+    
+
 
 
 class GNNPolicy(ActorCriticPolicy):
@@ -141,18 +154,21 @@ class GNNPolicy(ActorCriticPolicy):
 
     def _build_mlp_extractor(self) -> None:
         config = {
-            "clause_dim":16,
-            "lit_dim":64,
+            "clause_dim":64,
+            "lit_dim":32,
             "n_hops":4,
             "n_layers_C_update":3,
             "n_layers_L_update":3,
-            "n_layers_score":1,
+            "n_layers_score":2,
             "activation":"relu"
         }
         self.features_extractor = ConstructModule() #extract_features and these attributes are used inconsistently
         self.vf_features_extractor = ConstructModule()
         self.mlp_extractor = GNNWrapper(config)
-        self.mlp_extractor.latent_dim_pi = self.action_space.shape[0]
+        if type(self.action_space) == spaces.Discrete:
+            self.mlp_extractor.latent_dim_pi = self.action_space.n
+        else:
+            self.mlp_extractor.latent_dim_pi = self.action_space.shape[0]
         self.mlp_extractor.latent_dim_vf = 1
 
 
@@ -233,7 +249,8 @@ class LoggingCallback(BaseCallback):
 
     
     def _on_rollout_start(self):
-        yappi.get_func_stats().print_all()
+        #yappi.get_func_stats().print_all()
+        pass
 
     def _save_model_and_policy(self):
         pass

@@ -20,6 +20,7 @@ class SolverController:
         
     def start(self, cnf_inst, decisions_per_callback=200000, simplify_clauses=False, timeout_secs=2**31, args = [], verb=0):
         self.verb=verb
+        self.stop()
         self._stop = False
         self.inst = cnf_inst
         solverargs = [self.solver_path, cnf_inst[0], "-model", f"-decisions={decisions_per_callback}", f"-verb={0 if self.verb < 2 else 1}"]
@@ -28,6 +29,7 @@ class SolverController:
         if timeout_secs < 2**31:
             solverargs.append(f"-cpu-lim={timeout_secs}")
         solverargs.extend(args)
+        
         self.proc = subprocess.Popen(
             solverargs,
             stdin=subprocess.PIPE,      
@@ -47,8 +49,11 @@ class SolverController:
         self.writer = self.proc.stdin
         self.err = self.proc.stderr
 
+        self.debug_lines = []
+
         for line in self.reader:
             line = line.strip()
+            self.debug_lines.append(line)
             if self.verb > 3:
                 print(line)
             if line.startswith("m "):
@@ -61,12 +66,17 @@ class SolverController:
                     if self.verb > 1:
                         print(f"Read {csr['n_clauses']} clauses from shared memory")
                     self.fixed_clauses = csr
-                    return csr, 0, False, None, time.time() - self.start_time
+                    return csr, 0, False, False, None, time.time() - self.start_time
             elif line.startswith("v "):
                 if self.verb > 1:
                     print(line)
                 self.stop()
-                return None, 10, True, False, line.split(" ")[1:], time.time() - self.start_time 
+                return None, 1, True, False, line.split(" ")[1:], time.time() - self.start_time 
+        print(f"Solver exited unexpectedly in start(): poll returned {self.proc.poll()}")
+        for errline in self.err:
+            print(f"ERR: {errline.strip()}")
+        for debugline in self.debug_lines:
+            print(f"DBG: {debugline}")
         self.stop()
         return None, 0, True, False, None, time.time() - self.start_time
         
@@ -74,7 +84,9 @@ class SolverController:
     def stop(self):
         self._stop = True
         if self.proc:
-            try:
+            try: 
+                #self.writer.write("m csr ack\n")
+                #self.writer.flush()
                 self.proc.terminate()
             except Exception:
                 pass
@@ -107,6 +119,7 @@ class SolverController:
 
         for line in self.reader:
             line = line.strip()
+            self.debug_lines.append(line)
             if line.startswith("m "):
                 if self.verb > 2:
                     print(line)
@@ -139,16 +152,19 @@ class SolverController:
                 if self.verb > 1:
                     print(line)
                 self.stop()
-                return None, 10, True, False, line.split(" ")[1:], time.time() - start_step_time # solve reward
+                return None, 1, True, False, line.split(" ")[1:], time.time() - start_step_time # solve reward
 
             else:
                 if self.verb > 0:
                     print(line)
             if did_action and csr is not None and reward is not None:
                 return csr, reward, False, False, None, time.time() - start_step_time
-        print(f"Solver exited unexpectedly: poll returned {self.proc.poll()}")
+        print(f"Solver exited unexpectedly in step: poll returned {self.proc.poll()}")
         for errline in self.err:
             print(f"ERR: {errline.strip()}")
+        for debugline in self.debug_lines:
+            print(f"DBG: {debugline}")
+        self.stop()
         return None, 0, True, True, None, time.time() - start_step_time #process exited
 
 
@@ -157,7 +173,7 @@ class SolverController:
         buf = shm.buf
 
         header = np.frombuffer(buf, dtype=np.int32, count=3, offset=0).copy()
-        n_clauses = int(header[0])
+        n_clauses = int(header[0]) - 1
         n_lits = int(header[1])
         nnz = int(header[2])
         crow_bytes = (n_clauses + 1) * 4
@@ -172,7 +188,7 @@ class SolverController:
 
         self.writer.write("m csr ack\n")
         self.writer.flush()
-        #resource_tracker.unregister(shm.name, "shared_memory")
+        resource_tracker.unregister(shm._name, "shared_memory")
         shm.close()
 
         return {"crow_indices": crow_arr,

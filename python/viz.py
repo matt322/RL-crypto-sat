@@ -34,13 +34,15 @@ def cumulative_plot(data, xmax=200):
     plt.grid()
     plt.show()
 
-def var_viz(cnf, values):
+def var_viz(cnf, values, path, title):
     cnf = open(cnf, 'r').read()
     lines = cnf.splitlines()
     w = []
     h_in = []
     h_out = []
     a = []
+
+    
 
     getval = lambda x: values[x]
 
@@ -61,10 +63,16 @@ def var_viz(cnf, values):
         if line.startswith('c xor4'):
             break
 
+    fig, axs = plt.subplots(4, 1, figsize=(8, 10), gridspec_kw={'height_ratios': [len(w), len(h_in), len(h_out), len(a)]})
+    
+    norm = plt.Normalize(vmin=min(values), vmax=max(values))
+    sm = plt.cm.ScalarMappable(cmap='inferno', norm=norm)
+    sm.set_array([])
 
-    # Create a figure with subplots
-    fig, axs = plt.subplots(4, 1, figsize=(10, 10), gridspec_kw={'height_ratios': [len(w), len(h_in), len(h_out), len(a)]})
-
+    cbar = plt.colorbar(sm, ax=axs, orientation='vertical', fraction=0.02, pad=0.04)
+    cbar.ax.set_position([0.05, 0.1, 0.02, 0.8])  # Adjust the position of the colorbar
+    cbar.set_label('Value Range')
+   
     # Plot w
     axs[0].imshow(np.array(w), cmap='inferno')
     axs[0].set_title('Message Schedule (w)')
@@ -90,7 +98,9 @@ def var_viz(cnf, values):
     axs[3].set_yticks(range(len(a)))
 
     plt.tight_layout()
-    plt.show()
+    plt.suptitle(title)
+    plt.savefig(path)
+    plt.close()
 
 
 if __name__ == "__main__":

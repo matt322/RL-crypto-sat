@@ -1458,8 +1458,8 @@ lbool Solver::search(int nof_conflicts) {
 
     //MODIFICATION loop variables
     int last_decisions = 0;
-    int last_conflicts = 0;
-    std::ios::sync_with_stdio(false);
+    double cum_reward = 0.0;
+    
 
 
 
@@ -1539,6 +1539,9 @@ lbool Solver::search(int nof_conflicts) {
 
             analyze(confl, learnt_clause, selectors, backtrack_level, nblevels, szWithoutSelectors);
 
+            //MODIFICATION reward update
+            cum_reward += 1.0 / (nblevels * nblevels);
+
             stats[sumSizes]+= learnt_clause.size();
             lbdQueue.push(nblevels);
             sumLBD += nblevels;
@@ -1587,17 +1590,15 @@ lbool Solver::search(int nof_conflicts) {
         } else {
            // MODIFICATION decision limit
             if (decision_limit != 0 && decisions % decision_limit == 0 ) {
-                double reward = decisions > 0 ? (conflicts - last_conflicts)*1.0/(decisions - last_decisions) : 0.0;
-                last_conflicts = conflicts;
+                double reward = decisions > 0 ? cum_reward/(decisions - last_decisions) : 0.0;
+                cum_reward = 0.0;
                 last_decisions = decisions;
                 printf("m reward %f\n",  reward);
                 fflush(stdout);
-                //decisions++; // to avoid being called again at next iteration
-                //writeClauses(true, 2);
                 if (decisions > 0) {
-                    writeCSRToSharedMem(2);
-                    waitForActivityScores();
+                    writeCSRToSharedMem(2);  
                 }
+                waitForActivityScores();
             }
 
 
@@ -2127,23 +2128,34 @@ void Solver::writeCSRToSharedMem(int verb) { //writes crow_indices and col_indic
     size_t col_bytes = col_indices.size() * sizeof(int);
     size_t total_bytes = header_bytes + crow_bytes + col_bytes;
 
+    if (verb > 1) {
+        auto buildTime = std::chrono::high_resolution_clock::now();
+        printf("c csr nnz: %d\n", nnz);
+        printf("c csr n_clauses: %d\n", n_clauses);
+        printf("c csr n_lits: %d\n", n_lits);
+        printf("c csr total bytes: %zu\n", total_bytes);
+    }
+
     auto writeTime = std::chrono::high_resolution_clock::now();
-    std::string shm_name = "/csr_shared_mem_" + std::to_string(getpid());
+    std::string shm_name = "/csr_shm_" + std::to_string(getpid()) + "_" + std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count() % 1000000);
     try {
         
         int fd = shm_open(shm_name.c_str(), O_CREAT | O_RDWR, 0600);
         printf("m shared_mem name %s\n", shm_name.c_str());
         if (fd < 0) {
             perror("shm_open");
+            shm_unlink(shm_name.c_str());
             exit(1);
         }
         if (ftruncate(fd, (off_t)total_bytes) != 0) {
             perror("ftruncate");
+            shm_unlink(shm_name.c_str());
             exit(1);
         }
         void *ptr = mmap(nullptr, total_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
         if (ptr == MAP_FAILED) {
             perror("mmap");
+            shm_unlink(shm_name.c_str());
             exit(1);
         }
         char *p = (char*)ptr;

@@ -9,7 +9,7 @@ class Instance:
         self.cnf_path = f"cnf/sha1_{rounds}round.cnf"
         self.rounds = rounds
         self.nvars, self.nclauses = self.get_varcount(self.cnf_path)
-        self.instancefile = f"cnf/instance_{self.rounds}_rounds_{len(os.listdir("cnf"))}.cnf"
+        self.instancefile = f"cnf/instance_{self.rounds}_rounds_{len(os.listdir("cnf"))}_{os.getpid()}.cnf"
 
     def __del__(self):
         try:
@@ -46,7 +46,7 @@ class Instance:
         return self.sha1_pad(random_bits)
 
 
-    def generate(self, free_outputs=0, simplify=False, seed=None):
+    def generate(self, free_outputs=0, guarantee_soln=False, simplify=False, seed=None):
         """
         Generate a new instance in the file associated to the object with variables revealed according to probability p
 
@@ -65,16 +65,24 @@ class Instance:
         free_outputs_list = random.sample(outputs, free_outputs)
         shutil.copy(self.cnf_path, self.instancefile)
 
-        with open(self.instancefile, mode='a') as f:
-            for i in inputs:
-                f.write(f"{i} 0\n")
-        soln = list(subprocess.run(f"{self.solver_path} {self.instancefile} -model", text=True, shell=True, stdout=subprocess.PIPE).stdout.split(' '))
-        soln = list(map(int, soln[soln.index('SATISFIABLE\nv')+1:-1]))
-        shutil.copy(self.cnf_path, self.instancefile)
-        with open(self.instancefile, mode='a') as f:
-            for i,v in enumerate(soln):
-                if i >= outputs[0] and i <= outputs[-1] and i not in free_outputs_list:
-                    f.write(f"{v} 0\n")
+        if guarantee_soln:
+            with open(self.instancefile, mode='a') as f:
+                for i in inputs:
+                    f.write(f"{i} 0\n")
+            soln = list(subprocess.run(f"{self.solver_path} {self.instancefile} -model", text=True, shell=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout.split(' '))
+            soln = list(map(int, soln[soln.index('SATISFIABLE\nv')+1:-1]))
+            shutil.copy(self.cnf_path, self.instancefile)
+            with open(self.instancefile, mode='a') as f:
+                for i,v in enumerate(soln):
+                    if i >= outputs[0] and i <= outputs[-1] and i not in free_outputs_list:
+                        f.write(f"{v} 0\n")
+        else:
+            with open(self.instancefile, mode='a') as f:
+                for i,v in enumerate(outputs):
+                    if v not in free_outputs_list:
+                        f.write(f"{random.choice((-1, 1)) * (v + 1)} 0\n")
+            soln = None
+            
         if simplify:
             subprocess.run(f"{self.solver_path} {self.instancefile} -dimacs={self.instancefile}", text=True, shell=True, stdout=subprocess.DEVNULL)
         nvars, nclauses = self.get_varcount(self.instancefile)
