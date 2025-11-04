@@ -1445,7 +1445,7 @@ printf("c reinitialization of all variables activity/phase/learnt clauses.\n");
 |    all variables are decision variables, this means that the clause set is satisfiable. 'l_False'
 |    if the clause set is unsatisfiable. 'l_Undef' if the bound on number of conflicts is reached.
 |________________________________________________________________________________________________@*/
-lbool Solver::search(int nof_conflicts) {
+lbool Solver::search(int nof_conflicts, int &last_decisions, int &forward, double &cum_reward) {
     assert(ok);
     int backtrack_level;
     int conflictC = 0;
@@ -1455,12 +1455,6 @@ lbool Solver::search(int nof_conflicts) {
     bool aDecisionWasMade = false;
 
     starts++;
-
-    //MODIFICATION loop variables
-    int last_decisions = 0;
-    double cum_reward = 0.0;
-    
-
 
 
     // simplify
@@ -1589,8 +1583,9 @@ lbool Solver::search(int nof_conflicts) {
 
         } else {
            // MODIFICATION decision limit
-            if (decision_limit != 0 && decisions % decision_limit == 0 ) {
-                double reward = decisions > 0 ? cum_reward/(decisions - last_decisions) : 0.0;
+            int period_decisions = decisions - last_decisions;
+            if (decision_limit != 0 && period_decisions >= decision_limit && period_decisions >= forward) {
+                double reward = decisions > 0 ? cum_reward/period_decisions : 0.0;
                 cum_reward = 0.0;
                 last_decisions = decisions;
                 printf("m reward %f\n",  reward);
@@ -1598,7 +1593,7 @@ lbool Solver::search(int nof_conflicts) {
                 if (decisions > 0) {
                     writeCSRToSharedMem(2);  
                 }
-                waitForActivityScores();
+                forward = waitForActivityScores();
             }
 
 
@@ -1804,9 +1799,15 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
     }
     // Search:
     int curr_restarts = 0;
+
+    //MODIFICATION loop variables
+    int last_decisions = 0;
+    int forward = 0;
+    double cum_reward = 0.0;
+
     while(status == l_Undef) {
         status = search(
-                luby_restart ? luby(restart_inc, curr_restarts) * luby_restart_factor : 0); // the parameter is useless in glucose, kept to allow modifications
+                luby_restart ? luby(restart_inc, curr_restarts) * luby_restart_factor : 0, last_decisions, forward, cum_reward); // the parameter is useless in glucose, kept to allow modifications
 
         if(!withinBudget()) break;
         curr_restarts++;
@@ -2102,10 +2103,11 @@ void Solver::writeCSRToSharedMem(int verb) { //writes crow_indices and col_indic
     int totallits = 0;
     int n_vars = nVars();
     int n_lits = 2 * n_vars;
-    int n_clauses = clauses.size();
+    int n_clauses = clauses.size() + learnts.size();
+    int fixed_clauses = clauses.size();
 
     for (int i = 0; i < n_clauses; i++) {
-        const Clause& c = ca[clauses[i]];
+        const Clause& c = i < fixed_clauses ? ca[clauses[i]] : ca[learnts[i - fixed_clauses ]];
         if (simplified && satisfied(c)) {
             continue;
         }
@@ -2199,7 +2201,7 @@ void Solver::writeCSRToSharedMem(int verb) { //writes crow_indices and col_indic
 
 }
 
-void Solver::waitForActivityScores() {
+int Solver::waitForActivityScores() {
     printf("m activity start\n");
     fflush(stdout);
     std::string line;
@@ -2219,4 +2221,16 @@ void Solver::waitForActivityScores() {
         activity[idx] = val;
     }
     rebuildOrderHeap();
+    while (getline(std::cin, line)) {
+        if (line.empty()) continue;
+        if (line == "m continue") return 0;
+        int forward;
+        std::istringstream iss(line);
+        std::string m_token, cmd;
+        if (!(iss >> m_token >> cmd >> forward) || m_token != "m" || cmd != "forward") {
+            throw std::runtime_error("Invalid command while waiting for forward " + line);
+        }
+        printf("c received forward %d\n", forward);
+        return forward;
+    }
 }

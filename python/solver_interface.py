@@ -94,9 +94,10 @@ class SolverController:
     def is_finished(self):
         return self._stop
 
-    def step(self, activity_scores=None):
+    def step(self, activity_scores=None, go_ahead=None):
         """
         What can happen: solver continues, finishes, or times out, in each case return proper observation
+        Can forward the solver extra steps if needed, this is done last.
         returns: (learnt obs object, reward, done, timed out, model, time since start)
         """
         if self.proc is None or self.is_finished():
@@ -133,6 +134,13 @@ class SolverController:
                     self.writer.write("m done\n")
                     self.writer.flush()
                     did_action = True
+                    if go_ahead is not None:
+                        assert isinstance(go_ahead, int) and go_ahead > 0
+                        self.writer.write(f"m forward {go_ahead}\n")
+                        self.writer.flush()
+                    else:
+                        self.writer.write(f"m continue\n")
+                        self.writer.flush()
 
                 elif line.startswith("m shared_mem name"):
                     self.shm_name = line.split(" ")[3][1:]
@@ -140,7 +148,7 @@ class SolverController:
                 elif line.startswith("m csr written"):
                     csr = self.read_from_shared_mem(self.shm_name)
                     if self.verb > 1:
-                        print(f"Read {csr["n_clauses"]} clauses from shared memory")
+                        print(f"Read {csr["n_clauses"]} clauses from {self.shm_name}")
     
                 elif line.startswith("m reward "):
                     reward = float(line.split(" ")[2])
@@ -204,20 +212,21 @@ class SolverController:
         return [f"{i} {0.0}" for i in range(self.inst[2])]
 
 def verify_cnf():
-    inst = ["cnf/test.cnf", [], 40, 180]
+    inst = ["cnf/test.cnf", [], 15, 67]
     solver = SolverController()
-    print(solver.start(inst, 100, verb=2))
+    print(solver.start(inst, 1, verb=2, simplify_clauses=False))
     while not solver.is_finished():
-        print(solver.step(solver.zero_scores()))
+        solver.step(solver.zero_scores())
 
 
 if __name__ == "__main__":
     inst = Instance(rounds=21)
     solver = SolverController()
     cnf = inst.generate(seed=41)
-    solver.start(cnf, 50000, timeout_secs=40, verb=0)
-    for i in range(100):
-        print(solver.step(solver.zero_scores())[1])
+    solver.start(cnf, 1000, timeout_secs=40, verb=2)
+    print(solver.step(solver.zero_scores(), go_ahead=500000)[1])
+    for i in range(5):
+        print(solver.step(solver.zero_scores())[0]["n_clauses"])
 
    
     

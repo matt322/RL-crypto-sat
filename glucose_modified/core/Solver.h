@@ -278,7 +278,7 @@ public:
     //MODIFICATIONS
     void writeClauses(bool onlyLearnts, int verb=0); 
     void writeCSRToSharedMem(int verb=0);
-    void waitForActivityScores();
+    int waitForActivityScores();
     int decision_limit; 
     bool simplify_clauses;
 
@@ -426,7 +426,7 @@ protected:
     void     analyze          (CRef confl, vec<Lit>& out_learnt, vec<Lit> & selectors, int& out_btlevel,unsigned int &nblevels,unsigned int &szWithoutSelectors);    // (bt = backtrack)
     void     analyzeFinal     (Lit p, vec<Lit>& out_conflict);                         // COULD THIS BE IMPLEMENTED BY THE ORDINARIY "analyze" BY SOME REASONABLE GENERALIZATION?
     bool     litRedundant     (Lit p, uint32_t abstract_levels);                       // (helper method for 'analyze()')
-    lbool    search           (int nof_conflicts);                                     // Search for a given number of conflicts.
+    lbool    search           (int nof_conflicts, int &last_decisions, int &forward, double &cum_reward);                                     // Search for a given number of conflicts.
     virtual lbool    solve_           (bool do_simp = true, bool turn_off_simp = false);                                                      // Main solve method (assumptions given in 'assumptions').
     virtual void     reduceDB         ();                                              // Reduce the set of learnt clauses.
     void     removeSatisfied  (vec<CRef>& cs);                                         // Shrink 'cs' to contain only non-satisfied clauses.
