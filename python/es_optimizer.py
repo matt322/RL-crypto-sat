@@ -60,7 +60,8 @@ class OpenAIESOptimizer:
     @staticmethod
     def _worker_eval(x):
         # Called inside worker, where _worker_env is local
-        return _worker_fitness_fn(_worker_env, x)
+        cand, seed = x
+        return _worker_fitness_fn(_worker_env, cand, seed)
 
     # --- ES main loop ---
 
@@ -69,9 +70,10 @@ class OpenAIESOptimizer:
         eps_half = torch.randn(self.popsize // 2, self.dim)
         eps = torch.cat([eps_half, -eps_half], axis=0)
         candidates = self.model[None, :].detach() + self.sigma * eps
+        stepseed = np.random.randint(0, 2**32 - 1)
 
         if self._pool is not None:
-            fitness = self._pool.map(OpenAIESOptimizer._worker_eval, candidates)
+            fitness = self._pool.map(OpenAIESOptimizer._worker_eval, zip(candidates, [stepseed] * self.popsize))
         else:
             fitness = [self.fitness_fn(self.make_env_fn(), x) for x in candidates]
 

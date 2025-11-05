@@ -1584,7 +1584,7 @@ lbool Solver::search(int nof_conflicts, int &last_decisions, int &forward, doubl
         } else {
            // MODIFICATION decision limit
             int period_decisions = decisions - last_decisions;
-            if (decision_limit != 0 && period_decisions >= decision_limit && period_decisions >= forward) {
+            if (decision_limit != 0 && (decisions == 0 || period_decisions >= decision_limit && period_decisions >= forward)) {
                 double reward = decisions > 0 ? cum_reward/period_decisions : 0.0;
                 cum_reward = 0.0;
                 last_decisions = decisions;
@@ -2221,6 +2221,9 @@ int Solver::waitForActivityScores() {
         activity[idx] = val;
     }
     rebuildOrderHeap();
+    var_inc = 1;
+
+
     while (getline(std::cin, line)) {
         if (line.empty()) continue;
         if (line == "m continue") return 0;

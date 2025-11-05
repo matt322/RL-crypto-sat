@@ -7,14 +7,16 @@ import json
 
 
 def make_env():
-    return SolverEnv(rounds=21, decisions_per_callback=50000, free_outputs=0, single_inst=True, verb=0, normalize_actions = False)
+    return SolverEnv(rounds=21, decisions_per_callback=50000, free_outputs=0, single_inst=False, verb=0, normalize_actions = False)
    
-def fitness_fn(env, params):
-    obs, info = env.reset()
+def fitness_fn(env, params, seed):
+    obs, info = env.reset(seed)
     if obs is None:
         return 0
     done = False
-    reward = env.step(params)[1]
+    reward = 0
+    for i in range(5):
+        reward += env.step(params)[1]
     return reward
     
 
@@ -36,11 +38,11 @@ if __name__ == "__main__":
 
 
     e = make_env()
-    optimizer = OpenAIESOptimizer(dim=e.action_space.shape[0], make_env_fn=make_env, fitness_fn=fitness_fn, sigma=0.1, lr=0.01, popsize=256, n_workers=32)
+    optimizer = OpenAIESOptimizer(dim=e.action_space.shape[0], make_env_fn=make_env, fitness_fn=fitness_fn, sigma=0.5, lr=0.005, popsize=512, n_workers=32)
     info = {}
-    for i in range(2000):
+    for i in range(4000):
         info = optimizer.step()   
-        if i % 10 == 0:
+        if i % 25 == 0:
             var_viz("cnf/sha1_21round.cnf", info["model"], FIGPATH + f"es_model_gen_{i}.png", title="")
             var_viz("cnf/sha1_21round.cnf", info["grad"], FIGPATH + f"es_grad_gen_{i}.png", title="")
             with open(MODELPATH, "w") as f:

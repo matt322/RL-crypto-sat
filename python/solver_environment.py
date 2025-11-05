@@ -136,7 +136,13 @@ class BranchingHeuristicEnv(SolverEnv):
         kwargs["decisions_per_callback"], kwargs["simplify_graph"] = 1, True
         super().__init__(*args, **kwargs)
         self.action_space = Discrete(self.nvars)
-
+        
+    def reset(self, seed=None):
+        _, init = super().reset(seed=seed)
+        fast_forward = np.random.geometric(p=1/500000)
+        self.solver.step(self.solver.zero_scores(), go_ahead=fast_forward)
+        learnt = self.solver.step(self.solver.zero_scores())[0]
+        return self.get_obs(learnt), init
 
     def step(self, action): #action is variable index
         a = np.zeros(self.nvars)

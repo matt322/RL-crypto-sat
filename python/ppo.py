@@ -21,7 +21,7 @@ def branching_heuristic_experiment():
     print(sum(p.numel() for p in model.policy.mlp_extractor.parameters() if p.requires_grad))
     for i in range(100):
         torch.save(model.policy.state_dict(), "logs/ppo_branching_heuristic_model.pt")
-        model.learn(total_timesteps=10000, progress_bar=False)
+        model.learn(total_timesteps=4096*2, progress_bar=False)
 
 
     

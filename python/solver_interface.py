@@ -218,8 +218,18 @@ def verify_cnf():
     while not solver.is_finished():
         solver.step(solver.zero_scores())
 
+def verify_activity_scores():
+    inst = Instance()
+    cnf = inst.generate(seed = 41, guarantee_soln=True)
+    scores = [f"{i} {1 if v < 0 else 0}" for i,v in enumerate(cnf[1])]
+    solver = SolverController()
+    solver.start(cnf, 10000, verb=4)
+    assert solver.step(scores)[2] == True
+
 
 if __name__ == "__main__":
+    verify_activity_scores()
+    
     inst = Instance(rounds=21)
     solver = SolverController()
     cnf = inst.generate(seed=41)

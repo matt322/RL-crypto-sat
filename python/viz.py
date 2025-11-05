@@ -2,14 +2,14 @@ import matplotlib.pyplot as plt
 import json
 import numpy as np
 
-def extract(file, condition):
+def extract(file, condition, key="time"):
     res = []
     with open(file, 'r') as f:
         lines = f.readlines()
         for line in lines:
             line = json.loads(line)
             if condition(line):
-                res.append(line["time"])
+                res.append(line[key])
     return res
 
 def cumulative_plot(data, xmax=200):
@@ -104,6 +104,22 @@ def var_viz(cnf, values, path, title):
 
 
 if __name__ == "__main__":
+    rewards = np.array(extract("logs/logs/ppo_log_test.jsonl", lambda x: True, key="cumulative_reward"))
+    stepcounts = np.array(extract("logs/logs/ppo_log_test.jsonl", lambda x: True, key="steps"))
+    fitness = np.array(extract("logs/es_logs/4/es_log_0.jsonl", lambda x: True, key="fitness_mean"))
+    plt.plot(fitness)
+    plt.xlabel("Step")
+    plt.ylabel("Mean Fitness")
+    plt.title("Evolution strategies mean reward over time")
+    plt.show()
+
+    plt.plot(rewards/stepcounts)
+    plt.xlabel("Episode")
+    plt.ylabel("Average Reward per Step")
+    plt.title("PPO Branching Heuristic Average Reward per Step")
+    plt.show()
+
+    exit()
     basetimes = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 0)
    # reset_times = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] != 0 and x["free_outputs"] == 0)
     times_16 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 16)
