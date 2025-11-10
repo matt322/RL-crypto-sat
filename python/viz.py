@@ -12,20 +12,22 @@ def extract(file, condition, key="time"):
                 res.append(line[key])
     return res
 
-def cumulative_plot(data, xmax=200):
+def cumulative_plot(data):
     plt.figure()
-    
-    for label, times, max in data:
+    xmax = 0
+    for label, times, timeout in data:
         times = sorted(times)
+        xmax = max(xmax, max(times))
         n = len(times)
-        timeout_count = times.count(max)
+        timeout_count = times.count(timeout)
         non_timeout_count = n - timeout_count
 
         cumulative_percentages = [(i / n) * 100 for i in range(n)]
 
         plt.plot(times[:non_timeout_count], cumulative_percentages[:non_timeout_count], marker='o', label=label, markersize=3)
 
-    plt.xlim(0, xmax)
+    #plt.xlim(0, xmax)
+    plt.xscale('log')
     plt.ylim(0, 100)
     plt.xlabel('Time')
     plt.ylabel('% of Instances Solved')
@@ -34,7 +36,7 @@ def cumulative_plot(data, xmax=200):
     plt.grid()
     plt.show()
 
-def var_viz(cnf, values, path, title):
+def var_viz(cnf, values, path=None, title=None, null_vals=[-float("inf"), 0.0]):
     cnf = open(cnf, 'r').read()
     lines = cnf.splitlines()
     w = []
@@ -45,6 +47,8 @@ def var_viz(cnf, values, path, title):
     
 
     getval = lambda x: values[x]
+    filtered_vals = list(filter(lambda x: x not in null_vals, values))
+    values = [i if i not in null_vals else np.nan for i in values]
 
     for line in lines:
         if line.startswith('c var'):
@@ -65,10 +69,9 @@ def var_viz(cnf, values, path, title):
 
     fig, axs = plt.subplots(4, 1, figsize=(8, 10), gridspec_kw={'height_ratios': [len(w), len(h_in), len(h_out), len(a)]})
     
-    norm = plt.Normalize(vmin=min(values), vmax=max(values))
+    norm = plt.Normalize(vmin=min(filtered_vals), vmax=max(filtered_vals))
     sm = plt.cm.ScalarMappable(cmap='inferno', norm=norm)
     sm.set_array([])
-
     cbar = plt.colorbar(sm, ax=axs, orientation='vertical', fraction=0.02, pad=0.04)
     cbar.ax.set_position([0.05, 0.1, 0.02, 0.8])  # Adjust the position of the colorbar
     cbar.set_label('Value Range')
@@ -98,15 +101,19 @@ def var_viz(cnf, values, path, title):
     axs[3].set_yticks(range(len(a)))
 
     plt.tight_layout()
-    plt.suptitle(title)
-    plt.savefig(path)
+    if title:
+        plt.suptitle(title)
+    if path:
+        plt.savefig(path)
+    else:
+        plt.show()
     plt.close()
 
 
 if __name__ == "__main__":
-    rewards = np.array(extract("logs/logs/ppo_log_test.jsonl", lambda x: True, key="cumulative_reward"))
-    stepcounts = np.array(extract("logs/logs/ppo_log_test.jsonl", lambda x: True, key="steps"))
-    fitness = np.array(extract("logs/es_logs/4/es_log_0.jsonl", lambda x: True, key="fitness_mean"))
+    rewards = np.array(extract("logs/ppo_log_test.jsonl", lambda x: True, key="cumulative_reward"))
+    stepcounts = np.array(extract("logs/ppo_log_test.jsonl", lambda x: True, key="steps"))
+    fitness = np.array(extract("logs/logs/es_logs/1/es_log_0.jsonl", lambda x: True, key="fitness_mean"))
     plt.plot(fitness)
     plt.xlabel("Step")
     plt.ylabel("Mean Fitness")
@@ -119,7 +126,21 @@ if __name__ == "__main__":
     plt.title("PPO Branching Heuristic Average Reward per Step")
     plt.show()
 
+    es_times = extract("logs/es_logs/es_initialization_runtimes.jsonl", lambda x: True)
+    es_times_2 = extract("logs/es_logs/es_initialization_runtimes_3.jsonl", lambda x: True)
+    vanilla_times = extract("logs/es_logs/vanilla_runtimes.jsonl", lambda x: True)
+
+    cumulative_plot([
+        ("Vanilla Solver", vanilla_times, 200),
+        ("ES Initialized Solver", es_times_2, 200),
+        ("ES Initialized Solver one instance", es_times, 200),
+    ])
+    plt.scatter(vanilla_times, es_times)
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.show()
     exit()
+
     basetimes = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 0)
    # reset_times = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] != 0 and x["free_outputs"] == 0)
     times_16 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 16)
@@ -128,6 +149,7 @@ if __name__ == "__main__":
     times_128 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 128)
     times_96 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 96)
    # times_64 = extract("logs/avg_solvetime_log_1.jsonl", lambda x: x["rounds"] == 21 and x["decisions/callback"] == 0 and x["free_outputs"] == 64)
+    
 
     cumulative_plot([
         ("0 Free Outputs", basetimes, 200),
@@ -137,9 +159,9 @@ if __name__ == "__main__":
         ("128 Free Outputs", times_128, 200),
        ("96 Free Outputs", times_96, 200),
 
-    ], xmax=200)
+    ])
 
-    with open("logs/episode_log.jsonl", 'r') as f:
+    with open("logs/ppo_log_test.jsonl", 'r') as f:
         reward_plots = [json.loads(i)["rewards"] for i in f.readlines()]
     
     

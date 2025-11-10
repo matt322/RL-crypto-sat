@@ -98,7 +98,7 @@ class OpenAIESOptimizer:
         self.optimizer.zero_grad()
         self.model.grad = g
         self.optimizer.step()
-        info["model"] = self.model.detach().cpu().numpy()
+        #info["model"] = self.model.detach().cpu().numpy()
 
         return info
         

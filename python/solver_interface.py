@@ -168,10 +168,11 @@ class SolverController:
             if did_action and csr is not None and reward is not None:
                 return csr, reward, False, False, None, time.time() - start_step_time
         print(f"Solver exited unexpectedly in step: poll returned {self.proc.poll()}")
-        for errline in self.err:
-            print(f"ERR: {errline.strip()}")
-        for debugline in self.debug_lines:
-            print(f"DBG: {debugline}")
+        if self.verb > 1:
+            for errline in self.err:
+                print(f"ERR: {errline.strip()}")
+            for debugline in self.debug_lines:
+                print(f"DBG: {debugline}")
         self.stop()
         return None, 0, True, True, None, time.time() - start_step_time #process exited
 

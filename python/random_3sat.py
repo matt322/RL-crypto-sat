@@ -1,6 +1,6 @@
 import random
-nvars= 10
-nc = int(nvars * 4.5)
+nvars= 100
+nc = int(nvars * 4)
 
 def lit(*exc):
     l = random.randint(-nvars, nvars)

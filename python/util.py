@@ -10,7 +10,7 @@ from stable_baselines3.common.vec_env.dummy_vec_env import DummyVecEnv
 from gymnasium import spaces
 import torch
 import torch.nn as nn
-from gnn import rl_GNN1
+from gnn import rl_GNN1, GNNwithEmbeddings
 import yappi
 
 
@@ -109,7 +109,14 @@ class ObjectVecEnv(DummyVecEnv):
 class GNNWrapper(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.gnn = rl_GNN1(**config)
+        e = config.pop("use_embeddings")
+        self.discrete = config.pop("discrete", False)
+        if e:
+            self.gnn = GNNwithEmbeddings(**config)
+        else:
+            config.pop("nlits", None)
+            self.gnn = rl_GNN1(**config)
+        
         self.latent_dim_pi = None 
         self.latent_dim_vf = None
         self.value_net = None
@@ -123,8 +130,29 @@ class GNNWrapper(nn.Module):
        
         policy, value = torch.zeros(x.shape[0], self.latent_dim_pi, device=self.device), torch.zeros(x.shape[0], 1, device=self.device)
         for i in range(x.shape[0]):
-            p, v = self.gnn(x[i].to(self.device))
-            policy[i], value[i] = p.squeeze(), torch.mean(v).unsqueeze(0)
+            G = x[i].to(self.device)
+            nvars = x[i].shape[1] // 2
+            p, v = self.gnn(G)
+            unique_col_indices = set(G.col_indices().squeeze().cpu().numpy().tolist())
+            empty_vars = set(range(nvars)) - (set(filter(lambda x: x < nvars, unique_col_indices)) | set(map(lambda x: x - nvars, filter(lambda x: x >= nvars, unique_col_indices))))
+            mask = torch.zeros(nvars, dtype=torch.bool, device=self.device)
+            mask[list(empty_vars)] = True
+            p = p.squeeze()
+            p_initial = p.clone()
+            if self.discrete:
+                p.masked_fill_(mask, float('-inf'))
+            else:
+                p.masked_fill_(mask, 0.0)
+            if len(empty_vars) == nvars:
+                p[0] = 1.0
+                #print(G)
+            # if torch.all(torch.isneginf(p) | torch.isnan(p)):
+            #     print("detected all -inf")
+            #     print(G)
+            #     print(empty_vars)
+            #     print(p_initial)
+              
+            policy[i], value[i] = p, torch.mean(v).unsqueeze(0)
             
         return policy, value
     
@@ -150,6 +178,7 @@ class ConstructModule(nn.Module):
 class GNNPolicy(ActorCriticPolicy):
     def __init__(self, *args, **kwargs):
         kwargs["ortho_init"] = False
+        self.use_embeddings = kwargs.pop("use_embeddings", False)       
         super().__init__(*args, **kwargs)
 
     def _build_mlp_extractor(self) -> None:
@@ -160,15 +189,20 @@ class GNNPolicy(ActorCriticPolicy):
             "n_layers_C_update":3,
             "n_layers_L_update":3,
             "n_layers_score":2,
+            "use_embeddings": self.use_embeddings,
+            "normalize":False,
             "activation":"relu"
         }
         self.features_extractor = ConstructModule() #extract_features and these attributes are used inconsistently
         self.vf_features_extractor = ConstructModule()
+        
+        self.is_discrete = type(self.action_space) == spaces.Discrete
+        config["discrete"] = self.is_discrete
+        nvars = self.action_space.n if self.is_discrete else self.action_space.shape[0]
+        if config["use_embeddings"]:
+            config["nlits"] = nvars * 2
         self.mlp_extractor = GNNWrapper(config)
-        if type(self.action_space) == spaces.Discrete:
-            self.mlp_extractor.latent_dim_pi = self.action_space.n
-        else:
-            self.mlp_extractor.latent_dim_pi = self.action_space.shape[0]
+        self.mlp_extractor.latent_dim_pi = nvars
         self.mlp_extractor.latent_dim_vf = 1
 
 

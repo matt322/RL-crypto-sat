@@ -13,4 +13,4 @@ module load python/3.12
 
 source venv/bin/activate  
 
-python python/avg_solvetime.py  
+python python/test_runtimes.py  

@@ -2,19 +2,22 @@ from solver_environment import SolverEnv
 from instance_generation import Instance
 from viz import var_viz
 from es_optimizer import OpenAIESOptimizer
+from util import GNNWrapper
+import numpy as np
 import os
 import json
 
 
 def make_env():
-    return SolverEnv(rounds=21, decisions_per_callback=50000, free_outputs=0, single_inst=False, verb=0, normalize_actions = False)
+    return SolverEnv(rounds=21, decisions_per_callback=10000, free_outputs=0, single_inst=False, verb=0, normalize_actions = False)
    
-def fitness_fn(env, params, seed):
+def fitness_fn(env, model, seed):
     obs, info = env.reset(seed)
     if obs is None:
         return 0
-    done = False
-    reward = env.step(params)[1]
+
+    pred = model(obs)[0]
+    reward = env.step(pred)[1]
     return reward
     
 
@@ -34,9 +37,27 @@ if __name__ == "__main__":
     FIGPATH = LOGDIR + f"es_fig_{len(os.listdir(LOGDIR))}/"
     os.makedirs(FIGPATH, exist_ok=True)
 
+    config = {
+            "clause_dim":32,
+            "lit_dim":16,
+            "n_hops":2,
+            "n_layers_C_update":3,
+            "n_layers_L_update":3,
+            "n_layers_score":1,
+            "use_embeddings": True,
+            "embedding_dim":4,
+            "discrete":False,
+            "normalize":False,
+            "activation":"relu"
+        }
+
+    model = GNNWrapper(config)
+    model.latent_dim_pi = 3968
+    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
+
 
     e = make_env()
-    optimizer = OpenAIESOptimizer(dim=e.action_space.shape[0], make_env_fn=make_env, fitness_fn=fitness_fn, sigma=0.5, lr=0.005, popsize=512, n_workers=16)
+    optimizer = OpenAIESOptimizer(dim=e.action_space.shape[0], make_env_fn=make_env, fitness_fn=fitness_fn, sigma=0.1, lr=0.001, popsize=4096, n_workers=8)
     info = {}
     for i in range(4000):
         info = optimizer.step()   

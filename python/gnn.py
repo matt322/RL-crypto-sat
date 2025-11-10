@@ -309,3 +309,92 @@ class rl_GNN1(nn.Module):
     V = torch.cat([L[0:int(L.size()[0]/2)], L[int(L.size()[0]/2):]], dim=1)
 
     return (self.V_score(V), self.V_vote(V)) 
+
+
+class GNNwithEmbeddings(nn.Module):
+  def __init__(self,
+               clause_dim,
+               lit_dim,
+               n_hops,
+               n_layers_C_update,
+               n_layers_L_update,
+               n_layers_score,
+               activation,
+               nlits,
+               average_pool=False,
+               normalize=True,
+               embed_dim=8,
+               **kwargs):
+    super(GNNwithEmbeddings, self).__init__(**kwargs)
+    self.L_layer_norm = nn.LayerNorm(lit_dim)
+    self.L_init = nn.Parameter(torch.nn.init.xavier_normal_(torch.empty([nlits, embed_dim])), requires_grad=True)
+    self.embedding_proj = nn.Linear(embed_dim, lit_dim)
+
+    self.C_update = BasicMLP(input_dim=2*lit_dim,
+                             hidden_dims=[2*lit_dim for _ in range(n_layers_C_update)],
+                             output_dim=clause_dim, activation=activation, p_dropout=0.05)
+    self.L_update = BasicMLP(input_dim=(clause_dim),
+                             hidden_dims=[clause_dim for _ in range(n_layers_L_update)],
+                             output_dim=lit_dim, activation=activation, p_dropout=0.05)
+
+    self.V_score = BasicMLP(input_dim=2*lit_dim, hidden_dims=[2*lit_dim for _ in range(n_layers_score)],
+                                 output_dim=1, activation=activation, bias_at_end=True, p_dropout=0.15)
+    self.V_vote = BasicMLP(input_dim=2*lit_dim, hidden_dims=[2*lit_dim for _ in range(n_layers_score)],
+                                 output_dim=1, activation=activation, bias_at_end=True, p_dropout=0.15)
+
+    self.n_hops = n_hops
+    self.lit_dim = lit_dim
+    self.clause_dim = clause_dim
+    self.average_pool = average_pool
+    self.normalize = normalize
+    if not self.normalize:
+      self.C_layer_norm = nn.LayerNorm(clause_dim)
+
+
+
+
+  def forward(self, G):
+    n_clauses, n_lits = G.size()
+    n_vars = n_lits/2
+    L = self.embedding_proj(self.L_init)
+    if not (G.device == L.device):
+      L = L.to(G.device)
+
+    for T in range(self.n_hops):
+      L_flip = torch.cat([L[int(L.size()[0]/2):], L[0:int(L.size()[0]/2)]], dim=0)
+      if self.average_pool:
+        C_pre_msg = torch.cat([L, L_flip, torch.ones(G.size()[1],1, dtype=torch.float32, device=G.device)], dim=1)
+      else:
+        C_pre_msg = torch.cat([L, L_flip], dim=1)
+     
+      C_msg = torch.sparse.mm(G, C_pre_msg)
+
+      if self.average_pool:
+        C_neighbor_counts = C_msg[:,-1:]
+
+        C_msg = C_msg[:, :-1]
+
+        C_msg = C_msg/torch.max(C_neighbor_counts, torch.ones(C_neighbor_counts.size()[0], C_neighbor_counts.size()[1], device=G.device))
+
+      C = self.C_update(C_msg)
+      if self.normalize:
+        C = C - C.mean(dim=0)
+        C = C/(C.std(dim=0) + 1e-10)
+      else:
+        C = self.C_layer_norm(C)
+      if self.average_pool:
+        L_pre_msg = torch.cat([C, torch.ones(G.size()[0],1, dtype=torch.float32,device=G.device)], dim=1)
+      else:
+        L_pre_msg = C
+      L_msg = torch.sparse.mm(G.t(), L_pre_msg)
+      if self.average_pool:
+        L_neighbor_counts = L_msg[:,-1:]
+        L_msg = L_msg[:,:-1]
+        L_msg = L_msg/torch.max(L_neighbor_counts, torch.ones(L_neighbor_counts.size()[0],L_neighbor_counts.size()[1], device=G.device))
+      L = self.L_update(L_msg) + (0.1 * L)
+      L = self.L_layer_norm(L)
+
+
+    V = torch.cat([L[0:int(L.size()[0]/2)], L[int(L.size()[0]/2):]], dim=1)
+
+    return (self.V_score(V), self.V_vote(V)) 

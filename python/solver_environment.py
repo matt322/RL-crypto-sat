@@ -157,6 +157,70 @@ class BranchingHeuristicEnv(SolverEnv):
         res[1] = reward
         return tuple(res)
 
+class BranchingHeuristicTestEnv(SolverEnv):
+    def __init__(self, *args, **kwargs):
+        kwargs["decisions_per_callback"], kwargs["simplify_graph"] = 1, True
+        super().__init__(*args, **kwargs)
+        self.nvars = 100
+        self.action_space = Discrete(self.nvars)
+        self.observation_space = self.observation_space = Dict({
+            "crow_indices": Box(low=0, high=self.max_nnz, shape=(self.max_clauses+1,), dtype=np.int32),
+            "col_indices": Box(low=0, high=2*self.nvars-1, shape=(self.max_nnz,), dtype=np.int16),
+            "values": Box(low=0, high=1, shape=(self.max_nnz,), dtype=np.int8),
+            "nlits": Box(low=0, high=20000, shape=(1,), dtype=np.int32),
+            "n_clauses": Box(low=0, high=self.max_clauses, shape=(1,), dtype=np.int32),
+            "nnz": Box(low=0, high=self.max_nnz, shape=(1,), dtype=np.int32) #graph shape
+        })
+        self.cnf = ["cnf/test_100.cnf", None, 100, 400]
+        
+    def reset(self, seed=None):
+        if self.verb > 1:
+            print("Resetting environment")
+        if len(self.episode_log_dict) > 0:
+            with open(self.episode_log_file, "a") as f:
+                f.write(json.dumps(self.episode_log_dict) + "\n")
+            if self.verb > 0:
+                print(self.episode_log_dict)
+            
+        self.episode_log_dict = {}
+        self.episode_log_dict["seed"] = seed
+        self.episode_log_dict["steps"] = 0
+        super(SolverEnv, self).reset(seed=seed)
+        cnf = self.cnf
+        self.solver.stop()
+        obs, reward, done, truncated, model, init_time = self.solver.start(
+            cnf, 
+            decisions_per_callback=1, 
+            timeout_secs=200, 
+            verb=self.verb - 2,
+            simplify_clauses=self.simplify_graph,
+        )
+        if obs is None:
+            print(reward, model)
+
+        self.episode_log_dict["cumulative_reward"] = reward
+        self.episode_log_dict["truncated"] = False
+        self.episode_log_dict["max_nnz"] = 0
+        self.episode_stepcount = 0
+
+        return self.get_obs(obs), {"init time":init_time} #initial observation has no learnt clauses, fixed clauses added in method (whatever)
+
+    def step(self, action): #action is variable index
+        a = np.zeros(self.nvars)
+        a[action] = 1.0
+        res = list(super().step(a))
+        if res[2]:
+            print("terminated")
+
+        reward = res[1]
+        if reward != 1: #neuroglue reward
+            reward = -1/self.nvars
+        else:
+            reward = 1
+        self.episode_log_dict["cumulative_reward"] += reward - res[1]
+        res[1] = reward
+        return tuple(res)
+
 
 
 
