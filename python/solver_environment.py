@@ -17,6 +17,8 @@ class SolverEnv(gym.Env):
                  verb=0, 
                  normalize_actions = False,
                  step_limit=None,
+                 guarantee_soln = True,
+                 filter_scores = False,
                  logfile="logs/episode_log.jsonl"):
         super().__init__()
         self.free_outputs = free_outputs
@@ -25,12 +27,14 @@ class SolverEnv(gym.Env):
         self.verb = verb
         self.normalize_actions = normalize_actions
         self.step_limit = step_limit
+        self.guarantee_soln = guarantee_soln
         self.single_inst = single_inst
+        self.filter_scores = filter_scores
         self.cnf = cnf
         if self.cnf is None:
             self.sha1_instance = Instance(rounds=rounds)
         if single_inst and self.cnf is None:
-            self.single_cnf = self.sha1_instance.generate(free_outputs, guarantee_soln=True, seed=42)
+            self.single_cnf = self.sha1_instance.generate(free_outputs, guarantee_soln=self.guarantee_soln, seed=42)
         self.nvars = self.sha1_instance.nvars if self.cnf is None else self.cnf[2]
         self.max_clauses = 200_000 #most ive observed is around 150k
         self.solver = SolverController()
@@ -96,6 +100,11 @@ class SolverEnv(gym.Env):
 
         return self.get_obs(obs), {"init time":init_time} #initial observation has no learnt clauses, fixed clauses added in method (whatever)
 
+    def advance(self, steps):
+        learnt, reward, done, truncated, model, time = self.solver.step(self.solver.nothing_scores(), steps)
+        if done or truncated:
+            return None, {}
+        return self.get_obs(learnt), {}
 
 
     def step(self, action):
@@ -109,7 +118,11 @@ class SolverEnv(gym.Env):
             print(self.episode_stepcount)
         
         mult = self.nvars if self.normalize_actions else 1
-        learnt, reward, done, truncated, model, time = self.solver.step(activity_scores=[f"{i} {score * mult * self.score_multiplier}" for i, score in enumerate(action)])
+        if self.filter_scores:
+            scores = [f"{i} {score * mult * self.score_multiplier}" for i, score in filter(lambda x: x[1] not in [0.0, -float("inf")], enumerate(action))]
+        else:
+            scores = [f"{i} {score * mult * self.score_multiplier}" for i, score in enumerate(action)]
+        learnt, reward, done, truncated, model, time = self.solver.step(activity_scores=scores)
         truncated = truncated or step_truncated
 
         self.episode_log_dict["steps"] += 1

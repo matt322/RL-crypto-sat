@@ -111,9 +111,9 @@ def var_viz(cnf, values, path=None, title=None, null_vals=[-float("inf"), 0.0]):
 
 
 if __name__ == "__main__":
-    rewards = np.array(extract("logs/ppo_log_test.jsonl", lambda x: True, key="cumulative_reward"))
-    stepcounts = np.array(extract("logs/ppo_log_test.jsonl", lambda x: True, key="steps"))
-    fitness = np.array(extract("logs/logs/es_logs/1/es_log_0.jsonl", lambda x: True, key="fitness_mean"))
+    rewards = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="cumulative_reward"))
+    stepcounts = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="steps"))
+    fitness = np.array(extract("logs/23/es_nn_log_23.jsonl", lambda x: True, key="fitness_mean"))
     plt.plot(fitness)
     plt.xlabel("Step")
     plt.ylabel("Mean Fitness")
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     plt.title("PPO Branching Heuristic Average Reward per Step")
     plt.show()
 
-    es_times = extract("logs/es_logs/es_initialization_runtimes.jsonl", lambda x: True)
+    es_times = extract("logs/es_logs/es_initialization_runtimes_4.jsonl", lambda x: True)
     es_times_2 = extract("logs/es_logs/es_initialization_runtimes_3.jsonl", lambda x: True)
     vanilla_times = extract("logs/es_logs/vanilla_runtimes.jsonl", lambda x: True)
 

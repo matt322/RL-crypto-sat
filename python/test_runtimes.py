@@ -9,23 +9,28 @@ from solver_eval import generate_dataset
 if __name__ == "__main__":
     data = generate_dataset()
     vanilla_solver_log = "logs/es_logs/vanilla_runtimes.jsonl"
-    es_solver_log = "logs/es_logs/es_initialization_runtimes_3.jsonl"
+    es_solver_log = "logs/es_logs/es_initialization_runtimes_4.jsonl"
     es_scores = list(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"])
     scores = [f"{i} {v * 1e4}" for i,v in enumerate(es_scores)]
     solver = SolverController()
     for i, cnf in enumerate(data):
-        if i < 10:
-            continue     
-        time = solver.start(cnf, 5000000, timeout_secs=200, verb=0)[-1]
-        while not solver.is_finished():
+        # if i < 10:
+        #     continue     
+        time = solver.start(cnf, 10000, timeout_secs=200, verb=0)[-1]
+        iters = 0
+        for _ in range(20):
             time += solver.step(scores)[-1]
+            iters += 1
+        while not solver.is_finished():
+            time += solver.step(scores, go_ahead=10000000)[-1]
+            iters += 1
         time = min(time, 200)
-        print(f"Instance {i} ES time: {time}")
+        print(f"Instance {i} ES time: {time} Iters: {iters}")
         with open(es_solver_log, "a") as f:
             f.write(json.dumps({"instance": i, "time": time}) + "\n")
 
-        time = solver.start(cnf, 0, timeout_secs=200, verb=0)[-1]
-        time = min(time, 200)
-        print(f"Instance {i} Vanilla time: {time}")
-        with open(vanilla_solver_log, "a") as f:
-            f.write(json.dumps({"instance": i, "time": time}) + "\n")
+        # time = solver.start(cnf, 0, timeout_secs=200, verb=0)[-1]
+        # time = min(time, 200)
+        # print(f"Instance {i} Vanilla time: {time}")
+        # with open(vanilla_solver_log, "a") as f:
+        #     f.write(json.dumps({"instance": i, "time": time}) + "\n")

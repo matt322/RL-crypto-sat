@@ -35,7 +35,7 @@ def branching_heuristic_experiment():
 
     model = PPO(GNNPolicy, 
                 env, 
-                verbose=1, 
+                verbose=2, 
                 n_steps=2048,
                 batch_size=16,
                 n_epochs=2,
@@ -47,7 +47,7 @@ def branching_heuristic_experiment():
     #model.policy.load_state_dict(loaded)
     for i in range(32):
         torch.save(model.policy.state_dict(), "logs/ppo_branching_heuristic_model_emb.pt")
-        model.learn(total_timesteps=4096*4, progress_bar=True)
+        model.learn(total_timesteps=4096*4, progress_bar=False)
 
     
 

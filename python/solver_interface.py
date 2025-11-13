@@ -3,7 +3,7 @@ import time
 from instance_generation import Instance
 from multiprocessing import shared_memory, resource_tracker
 import numpy as np
-import gc
+import yappi
 
 #init solver, will write learnts to stdout and take activity scores as input
 #immediately yield non-learnt clauses (after simplification)
@@ -50,12 +50,13 @@ class SolverController:
         self.err = self.proc.stderr
 
         self.debug_lines = []
-
         for line in self.reader:
             line = line.strip()
             self.debug_lines.append(line)
             if self.verb > 3:
                 print(line)
+            if line.startswith("c "):
+                continue
             if line.startswith("m "):
                 if line.startswith("m shared_mem name"):
                     self.shm_name = line.split(" ")[3][1:]
@@ -210,7 +211,13 @@ class SolverController:
 
 
     def zero_scores(self):
-        return [f"{i} {0.0}" for i in range(self.inst[2])]
+        return [f"{i} {1e-8}" for i in range(self.inst[2])]
+    
+    def random_scores(self):
+        return [f"{i} {np.random.random()}" for i in range(self.inst[2])] 
+    
+    def nothing_scores(self):
+        return []
 
 def verify_cnf():
     inst = ["cnf/test.cnf", [], 15, 67]
@@ -224,7 +231,7 @@ def verify_activity_scores():
     cnf = inst.generate(seed = 41, guarantee_soln=True)
     scores = [f"{i} {1 if v < 0 else 0}" for i,v in enumerate(cnf[1])]
     solver = SolverController()
-    solver.start(cnf, 10000, verb=4)
+    solver.start(cnf, 10000, verb=0)
     assert solver.step(scores)[2] == True
 
 
@@ -234,7 +241,13 @@ if __name__ == "__main__":
     inst = Instance(rounds=21)
     solver = SolverController()
     cnf = inst.generate(seed=41)
-    solver.start(cnf, 1000, timeout_secs=40, verb=2)
+    yappi.clear_stats()
+    yappi.set_clock_type("wall")
+    yappi.start()
+    solver.start(cnf, 10000, timeout_secs=40, verb=0, simplify_clauses=True)
+    yappi.stop()
+    yappi.get_func_stats().print_all()
+    exit()
     print(solver.step(solver.zero_scores(), go_ahead=500000)[1])
     for i in range(5):
         print(solver.step(solver.zero_scores())[0]["n_clauses"])

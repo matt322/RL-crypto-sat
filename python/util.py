@@ -34,6 +34,11 @@ def construct_sparse_tensor(obs):
             )
         return res
 
+def get_assigned_vars(col_indices, nvars):
+    unique_col_indices = set(col_indices)
+    return set(range(nvars)) - (set(filter(lambda x: x < nvars, unique_col_indices)) | set(map(lambda x: x - nvars, filter(lambda x: x >= nvars, unique_col_indices))))
+
+
 
 class VariableRolloutBuffer(RolloutBuffer):
     def __init__(self, buffer_size, observation_space, action_space, device = "cuda" if torch.cuda.is_available() else "cpu", gae_lambda = 1, gamma = 0.99, n_envs = 1):
@@ -133,8 +138,10 @@ class GNNWrapper(nn.Module):
             G = x[i].to(self.device)
             nvars = x[i].shape[1] // 2
             p, v = self.gnn(G)
-            unique_col_indices = set(G.col_indices().squeeze().cpu().numpy().tolist())
-            empty_vars = set(range(nvars)) - (set(filter(lambda x: x < nvars, unique_col_indices)) | set(map(lambda x: x - nvars, filter(lambda x: x >= nvars, unique_col_indices))))
+
+            col_indices = G.col_indices().squeeze().cpu().numpy().tolist()
+            empty_vars = get_assigned_vars(col_indices, nvars)
+
             mask = torch.zeros(nvars, dtype=torch.bool, device=self.device)
             mask[list(empty_vars)] = True
             p = p.squeeze()
@@ -163,6 +170,9 @@ class GNNWrapper(nn.Module):
     def forward_critic(self, x):
         _, value = self.forward(x)
         return value
+    
+    def forward_direct_on_obs(self, x):
+        return self.forward(construct_sparse_tensor(x))[0].detach().cpu().numpy().squeeze()
     
     
 class ConstructModule(nn.Module):
