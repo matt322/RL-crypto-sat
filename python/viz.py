@@ -109,11 +109,19 @@ def var_viz(cnf, values, path=None, title=None, null_vals=[-float("inf"), 0.0]):
         plt.show()
     plt.close()
 
+def EMA(data, d=0.99):
+    res = [data[0]]
+    for i in data[1:]:
+        res.append(res[-1] * d + i * (1 - d))
+    return res
+
+
 
 if __name__ == "__main__":
     rewards = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="cumulative_reward"))
     stepcounts = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="steps"))
     fitness = np.array(extract("logs/23/es_nn_log_23.jsonl", lambda x: True, key="fitness_mean"))
+    fitness = EMA(fitness)
     plt.plot(fitness)
     plt.xlabel("Step")
     plt.ylabel("Mean Fitness")

@@ -77,7 +77,7 @@ def mean_and_conf(trajectories, confidence = 0.95):
 
 if __name__ == "__main__":
     decisions = 10000
-    env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False)
+    env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=0)
     config = {
             "clause_dim":32,
             "lit_dim":16,
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     
     model = GNNWrapper(config)
     model.latent_dim_pi = env.nvars
-    model.load_state_dict(torch.load("logs/20/es_nn_model_20.pt"))
+    model.load_state_dict(torch.load("logs/23/es_nn_model_23.pt"))
 
     static_scores = np.array(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze()
 
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     zero_baseline = lambda x: np.ones(env.nvars) * 1e-8
     static_model = lambda x: static_scores
 
-    nsteps = 200
+    nsteps = 10
 
     model_samples_x, model_samples_y = [], []
     vbase_samples_x, vbase_samples_y = [], []
@@ -129,12 +129,12 @@ if __name__ == "__main__":
         # plt.plot(range(len(samples)), samples, color="red", label = "random baseline" if  i == 0 else "")
 
     model_mean, model_conf = mean_and_conf(model_samples_y)
-    plt.plot(range(0, decisions*len(samples), decisions), model_mean, color="blue", label = "periodic refocusing average return")
+    plt.plot(range(0, decisions*len(samples), decisions), model_mean, color="blue", label = "static scores average return")
     plt.fill_between(range(0, decisions*len(samples), decisions), model_mean-model_conf, model_mean+model_conf, color='blue', alpha=0.2, label='95% CI')
 
     baseline_mean, baseline_conf = mean_and_conf(vbase_samples_y)
-    plt.plot(range(0, decisions*len(samples), decisions), baseline_mean, color="orange", label = "vanilla solver average return")
-    plt.fill_between(range(0, decisions*len(samples), decisions), baseline_mean-baseline_conf, baseline_mean+baseline_conf, color='orange', alpha=0.2)
+    plt.plot(range(0, decisions*len(samples), decisions), baseline_mean, color="green", label = "baseline average return")
+    plt.fill_between(range(0, decisions*len(samples), decisions), baseline_mean-baseline_conf, baseline_mean+baseline_conf, color='green', alpha=0.2)
 
     # plt.plot(range(0, decisions*len(samples), decisions), samples, color="blue", label = "starting with model scores" if  i == 0 else "")
     # plt.plot(range(0, decisions*len(samples), decisions), samples, color="blue", label = "starting with model scores" if  i == 0 else "")
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     plt.legend()
     plt.xlabel("number of decisions")
     plt.ylabel("return")
-    plt.title("Average return every 10,000 decisions, 10 sample trajectories")
+    plt.title("Average return every 20,000 decisions, 10 sample trajectories")
     plt.show()
 
     

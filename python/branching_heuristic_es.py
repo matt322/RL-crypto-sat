@@ -18,57 +18,139 @@ import json
 import torch
 import yappi
 
-
-def make_env():
-    return SolverEnv(
-        rounds=21, 
-        decisions_per_callback=20000, 
-        free_outputs=0, 
-        simplify_graph=True, 
-        single_inst=False, 
-        verb=0, 
-        guarantee_soln=False, 
-        normalize_actions = False,
-        filter_scores=True,
-    )
+def make_env_closure(decisions_per_callback, simplify, reward_pow):
+    def res():
+        return SolverEnv(
+            rounds=21, 
+            decisions_per_callback=decisions_per_callback, 
+            free_outputs=0, 
+            simplify_graph=simplify, 
+            single_inst=False, 
+            verb=0, 
+            guarantee_soln=False, 
+            normalize_actions = False,
+            filter_scores=True,
+            reward_pow=reward_pow,
+        )
+    return res
    
-def fitness_fn(env, model, params, seed):
-    obs, info = env.reset(seed)
-    if obs is None:
-        return 0
+def fitness_fn_closure(step_forward):
+    def res(env, model, params, seed):
+        obs, info = env.reset(seed)
+        if step_forward > 0:
+            np.random.seed(seed)
+            fast_forward = np.random.geometric(p=1/100000)
+            obs, info = env.advance(fast_forward)
+       
+        if obs is None:
+            return 0
     
-    param_dict = {}
-    idx = 0
-    for name, p in model.named_parameters():
-        numel = p.numel()
-        param_dict[name] = params[idx:idx+numel].view_as(p)
-        idx += numel
+        param_dict = {}
+        idx = 0
+        for name, p in model.named_parameters():
+            numel = p.numel()
+            param_dict[name] = params[idx:idx+numel].view_as(p)
+            idx += numel
 
-    pred = functional_call(model, param_dict, construct_sparse_tensor(obs))[0].squeeze()
-    reward = env.step(pred)[1]
-    return reward
+        pred = functional_call(model, param_dict, construct_sparse_tensor(obs))[0].squeeze()
+        reward = env.step(pred)[1]
+        if reward == 1:
+            return 0.01
+        return reward
+    return res
 
-def fitness_fn_stepforward(env, model, params, seed):
-    env.reset(seed)
+
+def run_experiment(title, steps, reward_pow, step_forward, embed_dim, static, decision_period, simplify_graph, n_workers):
+    print(f"starting experiment {title}")
     
-    np.random.seed(seed)
-    fast_forward = np.random.geometric(p=1/100000)
+    LOGDIR = "logs/es_logs/"
+    if not os.path.exists(LOGDIR):
+        os.makedirs(LOGDIR)
+        i = 1
+    else:
+        i = len(filter(lambda x: x.startswith(title), os.listdir(LOGDIR))) + 1
+    LOGDIR = f"logs/es_logs/{title}_{i}/"
+    os.makedirs(LOGDIR, exist_ok=True)
+    LOGPATH = LOGDIR + f"log.jsonl"
+    MODELPATH = LOGDIR + f"model.pt"
+    FIGPATH = LOGDIR + f"fig/"
+    os.makedirs(FIGPATH, exist_ok=True)
 
-    obs, info = env.advance(fast_forward)
-    if obs is None:
-        return 0, 0, fast_forward
-    param_dict = {}
-    idx = 0
-    for name, p in model.named_parameters():
-        numel = p.numel()
-        param_dict[name] = params[idx:idx+numel].view_as(p)
-        idx += numel
+    make_env = make_env_closure(decision_period, simplify_graph, reward_pow)
+    fitness_fn = fitness_fn_closure(step_forward)
 
-    pred = functional_call(model, param_dict, construct_sparse_tensor(obs))[0].squeeze()
-    reward = env.step(pred)[1]
-    if reward == 1:
-        return 0.01
-    return reward
+    e = make_env()
+    nlits = example_obs["nlits"]
+    examples = []
+    example_obs = e.reset()[0]
+    examples.append(construct_sparse_tensor(example_obs))
+    for i in range(4):
+        example_obs = e.step([])[0]
+        examples.append(construct_sparse_tensor(example_obs))
+        
+    if static:
+            config = {
+                "clause_dim":1,
+                "lit_dim":1,
+                "n_hops":0,
+                "n_layers_C_update":1,
+                "n_layers_L_update":1,
+                "n_layers_score":1,
+                "use_embeddings":True,
+                "embed_dim":1,
+                "nlits":nlits,
+                "discrete":False,
+                "normalize":False,
+                "activation":"relu"
+            }
+    else:
+        config = {
+                "clause_dim":32,
+                "lit_dim":16,
+                "n_hops":2,
+                "n_layers_C_update":3,
+                "n_layers_L_update":3,
+                "n_layers_score":1,
+                "use_embeddings": embed_dim > 0,
+                "nlits":nlits,
+                "discrete":False,
+                "normalize":False,
+                "activation":"relu"
+            }
+        if embed_dim > 0:
+            config["embed_dim"] = embed_dim
+
+    model = GNNWrapper(config)
+    model.latent_dim_pi = nlits // 2
+    print(f"Paramters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
+
+    optimizer = OpenAIESOptimizer(model, make_env_fn=make_env, fitness_fn=fitness_fn, sigma=0.05, lr=0.001, popsize=128 if static else 512, n_workers=n_workers)
+
+    info = {}
+    for i in range(steps):
+        info = optimizer.step()   
+        if i % 50 == 0:
+            for j, example_obs in enumerate(examples):
+                pred = model(example_obs)[0]
+                var_viz("cnf/sha1_21round.cnf", pred.detach().cpu().numpy().squeeze(), path=FIGPATH + f"es_{title}_gen_{i}_example_{j}.png", title="")
+            torch.save(model.state_dict(), MODELPATH)
+                
+                
+        with open(LOGPATH, "a") as f:
+            f.write(json.dumps({"gen": info["gen"],
+                             "return_mean": info["return_mean"],
+                             "return_std": info["return_std"],
+                             "return_max": info["return_max"],
+                             "fast_forward": info["ff"],
+                             }) + "\n")
+        print(
+                f"Gen {info['gen']:03d} | mean_return={info['return_mean']:.5e} | std_return={info['return_std']:.5e}" +
+                f"| max_return={info['return_max']:.5e} | fast-forward: {info["ff"]}",
+                flush=True
+            )
+        
+    optimizer.close()
+
 
 def embedding_variabletime_experiment():
     e = make_env()
@@ -187,17 +269,5 @@ def no_embedding_startsonly_experiment():
 if __name__ == "__main__":
     print("starting job")
 
-    LOGDIR = "logs/es_logs/"
-    if not os.path.exists(LOGDIR):
-        os.makedirs(LOGDIR)
-        i = 0
-    else:
-        i = len(os.listdir(LOGDIR))
-    LOGDIR = f"logs/es_logs/{i}/"
-    os.makedirs(LOGDIR, exist_ok=True)
-    LOGPATH = LOGDIR + f"es_nn_log_{i}.jsonl"
-    MODELPATH = LOGDIR + f"es_nn_model_{i}.pt"
-    FIGPATH = LOGDIR + f"es_nn_fig_{i}/"
-    os.makedirs(FIGPATH, exist_ok=True)
 
     embedding_variabletime_experiment()

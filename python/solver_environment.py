@@ -19,6 +19,7 @@ class SolverEnv(gym.Env):
                  step_limit=None,
                  guarantee_soln = True,
                  filter_scores = False,
+                 reward_pow = 2.0, #2 = (cumulative) Neuroglue reward, 0 = local learning rate
                  logfile="logs/episode_log.jsonl"):
         super().__init__()
         self.free_outputs = free_outputs

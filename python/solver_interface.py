@@ -18,12 +18,12 @@ class SolverController:
         self.proc = None
         self._stop = False
         
-    def start(self, cnf_inst, decisions_per_callback=200000, simplify_clauses=False, timeout_secs=2**31, args = [], verb=0):
+    def start(self, cnf_inst, decisions_per_callback=200000, simplify_clauses=False, timeout_secs=2**31, reward_pow = 2, args = [], verb=0):
         self.verb=verb
         self.stop()
         self._stop = False
         self.inst = cnf_inst
-        solverargs = [self.solver_path, cnf_inst[0], "-model", f"-decisions={decisions_per_callback}", f"-verb={0 if self.verb < 2 else 1}"]
+        solverargs = [self.solver_path, cnf_inst[0], "-model", f"-decisions={decisions_per_callback}", f"-verb={0 if self.verb < 2 else 1}", f"-reward_pow={reward_pow}"]
         if simplify_clauses:
             solverargs.append("-simplify_clauses")
         if timeout_secs < 2**31:
@@ -244,7 +244,7 @@ if __name__ == "__main__":
     yappi.clear_stats()
     yappi.set_clock_type("wall")
     yappi.start()
-    solver.start(cnf, 10000, timeout_secs=40, verb=0, simplify_clauses=True)
+    solver.start(cnf, 10000, timeout_secs=40, verb=4, simplify_clauses=True, reward_pow=2)
     yappi.stop()
     yappi.get_func_stats().print_all()
     exit()

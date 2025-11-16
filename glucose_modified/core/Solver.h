@@ -281,6 +281,7 @@ public:
     int waitForActivityScores();
     int decision_limit; 
     bool simplify_clauses;
+    double reward_pow;
 
 
 

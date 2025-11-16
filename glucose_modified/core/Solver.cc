@@ -140,6 +140,7 @@ Solver::Solver() :
 //
 decision_limit(0)
 , simplify_clauses(false)
+, reward_pow(2)
 
 , verbosity(0)
 , showModel(0)
@@ -306,6 +307,7 @@ Solver::Solver(const Solver &s) :
 
 , decision_limit(s.decision_limit)
 , simplify_clauses(s.simplify_clauses)
+, reward_pow(s.reward_pow)
 {
     // Copy clauses.
     s.ca.copyTo(ca);
@@ -1532,9 +1534,8 @@ lbool Solver::search(int nof_conflicts, int &last_decisions, int &forward, doubl
             selectors.clear();
 
             analyze(confl, learnt_clause, selectors, backtrack_level, nblevels, szWithoutSelectors);
-
             //MODIFICATION reward update
-            cum_reward += 1.0 / (nblevels * nblevels);
+            cum_reward += pow((double)nblevels, -reward_pow);
 
             stats[sumSizes]+= learnt_clause.size();
             lbdQueue.push(nblevels);

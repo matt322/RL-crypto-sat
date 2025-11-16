@@ -144,6 +144,7 @@ int main(int argc, char** argv)
 
         IntOption opt_decisions("MAIN", "decisions", "Limit the number of decisions (0 for no limit)", 0, IntRange(0, INT32_MAX));
         BoolOption opt_simplify_clauses("MAIN", "simplify_clauses", "Simplify clauses during search", false);
+        DoubleOption opt_reward_pow("MAIN", "reward_pow", "each learned clause contributes 1/LBD^pow to reward", 2.0, DoubleRange(0, true, HUGE_VAL, false));
 
         parseOptions(argc, argv, true);
 
@@ -152,6 +153,7 @@ int main(int argc, char** argv)
 
         S.decision_limit = opt_decisions;
         S.simplify_clauses = opt_simplify_clauses;
+        S.reward_pow = opt_reward_pow;
 
         S.parsing = 1;
         S.use_simplification = pre;
