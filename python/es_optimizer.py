@@ -20,12 +20,15 @@ class OpenAIESOptimizer:
         n_workers (int): Number of worker processes.
     """
 
-    def __init__(self, model, make_env_fn, fitness_fn,
+    def __init__(self, model, make_env_fn, make_env_args, fitness_fn, fitness_args,
                  sigma=0.1, lr=0.01, popsize=128, n_workers=None):
 
         assert popsize % 2 == 0, "popsize must be even for antithetic sampling"
         self.make_env_fn = make_env_fn
         self.fitness_fn = fitness_fn
+        self.evalargs = fitness_args
+        self.step_forward = fitness_args
+        self.envargs = make_env_args
         self.sigma = sigma
         self.lr = lr
         self.popsize = popsize
@@ -43,7 +46,7 @@ class OpenAIESOptimizer:
             self._pool = self._ctx.Pool(
                 self.n_workers,
                 initializer=self._worker_init,
-                initargs=(make_env_fn, fitness_fn, self.model),
+                initargs=(make_env_fn, fitness_fn, self.model, self.evalargs, self.envargs),
             )
             statuses = self._pool.map(self.worker_info, range(self.n_workers))
             print("\n".join(statuses))
@@ -60,17 +63,18 @@ class OpenAIESOptimizer:
         return f"Worker {i} initialized on host {socket.gethostname()}, PID {os.getpid()}."
 
     @staticmethod
-    def _worker_init(make_env_fn, fitness_fn, m):
-        global _worker_env, _worker_fitness_fn, _model
-        _worker_env = make_env_fn()
-        _worker_fitness_fn = fitness_fn
+    def _worker_init(make_env_fn, fitness_fn, m, evalargs, envargs):
+        global _worker_env, _worker_fitness_fn, _model, _make_env_config, _fitness_fn_config
+        _make_env_config = envargs
+        _fitness_fn_config = evalargs
+        _worker_env = make_env_fn(*_make_env_config)
+        _worker_fitness_fn = lambda *x: fitness_fn(*x, _fitness_fn_config)
         _model = m
         _model.eval()
         
 
     @staticmethod
     def _worker_eval(x):
-        # Called inside worker, where _worker_env is local
         model, params, seed = x
         return _worker_fitness_fn(_worker_env, model, params, seed)
     
@@ -93,8 +97,6 @@ class OpenAIESOptimizer:
     def make_env(self):
         return SolverEnv(rounds=21, decisions_per_callback=10000, free_outputs=0, simplify_graph=True, single_inst=False, verb=0, normalize_actions = False)
 
-    # --- ES main loop ---
-
     def get_grad_est(self):
         """Perform one ES update step."""
         theta = self.flatten_params(self.model)
@@ -103,9 +105,13 @@ class OpenAIESOptimizer:
         eps = torch.cat([eps_half, -eps_half], dim=0)
 
         candidates = theta[None, :] + self.sigma * eps
+
         stepseed = np.random.randint(0, 2**32 - 1)
-        np.random.seed(stepseed)
-        fast_forward = np.random.geometric(p=1/100000)
+        if self.step_forward > 0:
+            np.random.seed(stepseed)
+            fast_forward = np.random.geometric(p=1/self.step_forward)
+        else:
+            fast_forward = 0
 
         argslist = zip([self.model]*len(candidates), candidates, [stepseed] * self.popsize)
         if self._pool is not None:
@@ -125,9 +131,9 @@ class OpenAIESOptimizer:
             "gen": self._gen,
             "grad": grad_est,
             "ff":fast_forward,
-            "fitness_mean": float(fitness.mean()),
-            "fitness_max": float(fitness.max()),
-            "fitness_std": float(fitness.std()),
+            "return_mean": float(fitness.mean()),
+            "return_max": float(fitness.max()),
+            "return_std": float(fitness.std()),
         }
     
     def step(self):

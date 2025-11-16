@@ -12,6 +12,13 @@ import torch
 import torch.nn as nn
 from gnn import rl_GNN1, GNNwithEmbeddings
 import yappi
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message=".*Sparse CSR tensor support is in beta state.*",   # regex match
+    category=UserWarning
+)
 
 
 def construct_sparse_tensor(obs):

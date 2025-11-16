@@ -18,57 +18,69 @@ import json
 import torch
 import yappi
 
-def make_env_closure(decisions_per_callback, simplify, reward_pow):
-    def res():
-        return SolverEnv(
-            rounds=21, 
-            decisions_per_callback=decisions_per_callback, 
-            free_outputs=0, 
-            simplify_graph=simplify, 
-            single_inst=False, 
-            verb=0, 
-            guarantee_soln=False, 
-            normalize_actions = False,
-            filter_scores=True,
-            reward_pow=reward_pow,
-        )
-    return res
+
+def make_env(decisions_per_callback, simplify, reward_pow):
+    return SolverEnv(
+        rounds=21, 
+        decisions_per_callback=decisions_per_callback, 
+        free_outputs=0, 
+        simplify_graph=simplify, 
+        single_inst=False, 
+        verb=0, 
+        guarantee_soln=False, 
+        normalize_actions = False,
+        filter_scores=True,
+        reward_pow=reward_pow,
+    )
    
-def fitness_fn_closure(step_forward):
-    def res(env, model, params, seed):
-        obs, info = env.reset(seed)
-        if step_forward > 0:
-            np.random.seed(seed)
-            fast_forward = np.random.geometric(p=1/100000)
-            obs, info = env.advance(fast_forward)
-       
-        if obs is None:
-            return 0
+def fitness_fn(env, model, params, seed, step_forward):   
+    obs, info = env.reset(seed)
+    if step_forward > 0:
+        np.random.seed(seed)
+        fast_forward = np.random.geometric(p=1/step_forward)
+        obs, info = env.advance(fast_forward)
     
-        param_dict = {}
-        idx = 0
-        for name, p in model.named_parameters():
-            numel = p.numel()
-            param_dict[name] = params[idx:idx+numel].view_as(p)
-            idx += numel
+    if obs is None:
+        return 0
 
-        pred = functional_call(model, param_dict, construct_sparse_tensor(obs))[0].squeeze()
-        reward = env.step(pred)[1]
-        if reward == 1:
-            return 0.01
-        return reward
-    return res
+    param_dict = {}
+    idx = 0
+    for name, p in model.named_parameters():
+        numel = p.numel()
+        param_dict[name] = params[idx:idx+numel].view_as(p)
+        idx += numel
 
+    pred = functional_call(model, param_dict, construct_sparse_tensor(obs))[0].squeeze()
+    reward = env.step(pred)[1]
+    if reward == 1:
+        return 0.01
+    return reward
 
-def run_experiment(title, steps, reward_pow, step_forward, embed_dim, static, decision_period, simplify_graph, n_workers):
+def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, static, decision_period, simplify_graph, n_workers):
+    r"""
+    Runs Evolution Strategies experiment
+    
+    Args
+        title:
+        steps: (adam) optimizer updates
+        popsize: number of samples for gradient estimate (uses antithetic sampling; must be even)
+        reward_pow: each clause learned in the decision_period contributes LBD^-reward_pow to the return
+        step_forward: sample from geometric dist with mean step_forward, offset solver by that many decisions
+        embed_dim: per-literal learned embedding. set to 0 for a single embedding for all lits
+        static: learn 1 dimensional literal embeddings and affine transformation
+        decision_period: decisions per step
+        simplify_graph: eliminate assigned variables and satisfied clauses
+        n_workers: for parallel computing
+    """
+
     print(f"starting experiment {title}")
-    
+
     LOGDIR = "logs/es_logs/"
     if not os.path.exists(LOGDIR):
         os.makedirs(LOGDIR)
         i = 1
     else:
-        i = len(filter(lambda x: x.startswith(title), os.listdir(LOGDIR))) + 1
+        i = len(list(filter(lambda x: x.startswith(title), os.listdir(LOGDIR)))) + 1
     LOGDIR = f"logs/es_logs/{title}_{i}/"
     os.makedirs(LOGDIR, exist_ok=True)
     LOGPATH = LOGDIR + f"log.jsonl"
@@ -76,13 +88,13 @@ def run_experiment(title, steps, reward_pow, step_forward, embed_dim, static, de
     FIGPATH = LOGDIR + f"fig/"
     os.makedirs(FIGPATH, exist_ok=True)
 
-    make_env = make_env_closure(decision_period, simplify_graph, reward_pow)
-    fitness_fn = fitness_fn_closure(step_forward)
+    _make_env_config = (decision_period, simplify_graph, reward_pow)
+    _fitness_fn_config = (step_forward)
 
-    e = make_env()
-    nlits = example_obs["nlits"]
+    e = make_env(*_make_env_config)
     examples = []
     example_obs = e.reset()[0]
+    nlits = example_obs["nlits"]
     examples.append(construct_sparse_tensor(example_obs))
     for i in range(4):
         example_obs = e.step([])[0]
@@ -124,7 +136,17 @@ def run_experiment(title, steps, reward_pow, step_forward, embed_dim, static, de
     model.latent_dim_pi = nlits // 2
     print(f"Paramters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
 
-    optimizer = OpenAIESOptimizer(model, make_env_fn=make_env, fitness_fn=fitness_fn, sigma=0.05, lr=0.001, popsize=128 if static else 512, n_workers=n_workers)
+    optimizer = OpenAIESOptimizer(
+        model, 
+        make_env_fn=make_env, 
+        make_env_args=_make_env_config, 
+        fitness_fn=fitness_fn, 
+        fitness_args=_fitness_fn_config, 
+        sigma=0.05, 
+        lr=0.001, 
+        popsize=popsize, 
+        n_workers=n_workers
+    )
 
     info = {}
     for i in range(steps):
@@ -152,122 +174,32 @@ def run_experiment(title, steps, reward_pow, step_forward, embed_dim, static, de
     optimizer.close()
 
 
-def embedding_variabletime_experiment():
-    e = make_env()
-    example_obs = e.reset()[0]
-    nlits = example_obs["nlits"]
-    example_obs = construct_sparse_tensor(example_obs)
-
-    config = {
-            "clause_dim":32,
-            "lit_dim":16,
-            "n_hops":2,
-            "n_layers_C_update":3,
-            "n_layers_L_update":3,
-            "n_layers_score":1,
-            "use_embeddings": True,
-            "embed_dim":4,
-            "nlits":nlits,
-            "discrete":False,
-            "normalize":False,
-            "activation":"relu"
-        }
-
-    model = GNNWrapper(config)
-    model.latent_dim_pi = nlits // 2
-    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
-
-    optimizer = OpenAIESOptimizer(model, make_env_fn=make_env, fitness_fn=fitness_fn_stepforward, sigma=0.05, lr=0.001, popsize=512, n_workers=32)
-    #yappi.set_clock_type("wall")
-    #yappi.clear_stats()
-    #yappi.start()
-    
-
-    info = {}
-    for i in range(4000):
-        info = optimizer.step()   
-        if i % 50 == 0:
-            pred = model(example_obs)[0]
-            var_viz("cnf/sha1_21round.cnf", pred.detach().cpu().numpy().squeeze(), path=FIGPATH + f"es_nn_model_gen_{i}.png", title="")
-            #var_viz("cnf/sha1_21round.cnf", info["grad"], FIGPATH + f"es_grad_gen_{i}.png", title="")
-            torch.save(model.state_dict(), MODELPATH)
-                
-                
-        with open(LOGPATH, "a") as f:
-            f.write(json.dumps({"gen": info["gen"],
-                             "fitness_mean": info["fitness_mean"],
-                             "fitness_std": info["fitness_std"],
-                             "fitness_max": info["fitness_max"],
-                             "fast_forward": info["ff"],
-                             }) + "\n")
-        print(
-                f"Gen {info['gen']:03d} | mean_fitness={info['fitness_mean']:.5e} | std_fitness={info['fitness_std']:.5e}" +
-                f"| max_fitness={info['fitness_max']:.5e} | fast-forward: {info["ff"]}",
-                flush=True
-            )
-        
-    #yappi.stop()
-    #yappi.get_func_stats(filter_callback=lambda x: x.ttot > 0.1).print_all()
-    optimizer.close()
-
-def no_embedding_startsonly_experiment():
-    e = make_env()
-    example_obs = e.reset()[0]
-    nlits = example_obs["nlits"]
-    example_obs = construct_sparse_tensor(example_obs)
-
-    config = {
-            "clause_dim":32,
-            "lit_dim":16,
-            "n_hops":2,
-            "n_layers_C_update":3,
-            "n_layers_L_update":3,
-            "n_layers_score":1,
-            "use_embeddings": False,
-            "nlits":nlits,
-            "discrete":False,
-            "normalize":False,
-            "activation":"relu"
-        }
-
-    model = GNNWrapper(config)
-    model.latent_dim_pi = nlits // 2
-    print(sum(p.numel() for p in model.parameters() if p.requires_grad))
-
-    optimizer = OpenAIESOptimizer(model, make_env_fn=make_env, fitness_fn=fitness_fn, sigma=0.07, lr=0.001, popsize=512, n_workers=64)
-    #yappi.set_clock_type("wall")
-    #yappi.clear_stats()
-    #yappi.start()
-    
-
-    info = {}
-    for i in range(4000):
-        info = optimizer.step()   
-        if i % 50 == 0:
-            pred = model(example_obs)[0]
-            var_viz("cnf/sha1_21round.cnf", pred.detach().cpu().numpy().squeeze(), path=FIGPATH + f"es_nn_model_gen_{i}.png", title="")
-            #var_viz("cnf/sha1_21round.cnf", info["grad"], FIGPATH + f"es_grad_gen_{i}.png", title="")
-            torch.save(model.state_dict(), MODELPATH)
-                
-                
-        with open(LOGPATH, "a") as f:
-            f.write(json.dumps({"gen": info["gen"],
-                             "fitness_mean": info["fitness_mean"],
-                             "fitness_std": info["fitness_std"],
-                             "fitness_max": info["fitness_max"],
-                             }) + "\n")
-        print(
-                f"Gen {info['gen']:03d} | mean_fitness={info['fitness_mean']:.5e} | std_fitness={info['fitness_std']:.5e}" +
-                f"| max_fitness={info['fitness_max']:.5e}",
-                flush=True
-            )
-        
-    #yappi.stop()
-    #yappi.get_func_stats(filter_callback=lambda x: x.ttot > 0.1).print_all()
-    optimizer.close()
-
 if __name__ == "__main__":
-    print("starting job")
+    n_workers = 64
+    run_experiment(
+        title="static_noadvance_alpha=0",
+        steps=1000,
+        popsize=128,
+        reward_pow=0,
+        step_forward=0,
+        embed_dim=0,
+        static=True,
+        decision_period=10000,
+        simplify_graph=True,
+        n_workers=n_workers,
+    )
+    
+    run_experiment(
+        title="static_advance_alpha=0",
+        steps=1000,
+        popsize=128,
+        reward_pow=0,
+        step_forward=20000,
+        embed_dim=0,
+        static=True,
+        decision_period=10000,
+        simplify_graph=True,
+        n_workers=n_workers,
+    )
 
 
-    embedding_variabletime_experiment()
