@@ -1,6 +1,6 @@
 from solver_environment import SolverEnv
 from solver_interface import SolverController
-from util import GNNWrapper
+from util import GNNWrapper, get_gnn_config
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
@@ -76,46 +76,34 @@ def mean_and_conf(trajectories, confidence = 0.95):
 
 
 if __name__ == "__main__":
-    decisions = 10000
-    env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=0)
-    config = {
-            "clause_dim":32,
-            "lit_dim":16,
-            "n_hops":2,
-            "n_layers_C_update":3,
-            "n_layers_L_update":3,
-            "n_layers_score":1,
-            "use_embeddings": True,
-            "embed_dim":4,
-            "nlits":env.nvars * 2,
-            "discrete":False,
-            "normalize":False,
-            "activation":"relu"
-        }
+    decisions = 5000
+    env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=2)
+    gnn_config = get_gnn_config(static=True, nlits=env.nvars * 2, embed_dim=4)
     
-    model = GNNWrapper(config)
-    model.latent_dim_pi = env.nvars
-    model.load_state_dict(torch.load("logs/23/es_nn_model_23.pt"))
+    model = GNNWrapper(gnn_config)
+    model.load_state_dict(torch.load("logs/static_noadvance_alpha=0_6/model.pt"))
+    obs, _ = env.reset()
+    model_all = model.forward_direct_on_obs(obs)
 
-    static_scores = np.array(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze()
+    static_scores_a2 = lambda x: np.array(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze() 
+    static_scores_a0 = lambda x: model_all
 
     vanilla_baseline = lambda x: []
     random_baseline = lambda x: np.random.uniform(0, 1, env.nvars)
     zero_baseline = lambda x: np.ones(env.nvars) * 1e-8
-    static_model = lambda x: static_scores
 
-    nsteps = 10
+    nsteps = 60
 
     model_samples_x, model_samples_y = [], []
     vbase_samples_x, vbase_samples_y = [], []
     model_samples_x, model_samples_y = [], []
-    for i in range(10):
+    for i in range(20):
         print("getting model samples")
         #samples = sample_periodically(env, static_model, nsteps)
-        samples = sample_returns_within_period(env, static_model, nsteps, 1)
+        samples = sample_returns_within_period(env, static_scores_a2, 15, 4)
         model_samples_y.append(samples)
         
-        print("getting base samples")
+        print("getting static samples")
         samples = sample_returns_within_period(env, vanilla_baseline, nsteps, 1)
         vbase_samples_y.append(samples)
 
@@ -129,11 +117,11 @@ if __name__ == "__main__":
         # plt.plot(range(len(samples)), samples, color="red", label = "random baseline" if  i == 0 else "")
 
     model_mean, model_conf = mean_and_conf(model_samples_y)
-    plt.plot(range(0, decisions*len(samples), decisions), model_mean, color="blue", label = "static scores average return")
+    plt.plot(range(0, decisions*len(samples), decisions), model_mean, color="blue", label = "static variable scores")
     plt.fill_between(range(0, decisions*len(samples), decisions), model_mean-model_conf, model_mean+model_conf, color='blue', alpha=0.2, label='95% CI')
 
     baseline_mean, baseline_conf = mean_and_conf(vbase_samples_y)
-    plt.plot(range(0, decisions*len(samples), decisions), baseline_mean, color="green", label = "baseline average return")
+    plt.plot(range(0, decisions*len(samples), decisions), baseline_mean, color="green", label = "vanilla solver")
     plt.fill_between(range(0, decisions*len(samples), decisions), baseline_mean-baseline_conf, baseline_mean+baseline_conf, color='green', alpha=0.2)
 
     # plt.plot(range(0, decisions*len(samples), decisions), samples, color="blue", label = "starting with model scores" if  i == 0 else "")
@@ -141,9 +129,9 @@ if __name__ == "__main__":
 
 
     plt.legend()
-    plt.xlabel("number of decisions")
-    plt.ylabel("return")
-    plt.title("Average return every 20,000 decisions, 10 sample trajectories")
+    plt.xlabel("Decisions")
+    plt.ylabel("Return (a=2)")
+    plt.title("Average return refocusing every 20k decisions, 20 samples")
     plt.show()
 
     

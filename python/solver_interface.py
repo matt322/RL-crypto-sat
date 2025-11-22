@@ -97,8 +97,8 @@ class SolverController:
 
     def step(self, activity_scores=None, go_ahead=None):
         """
-        What can happen: solver continues, finishes, or times out, in each case return proper observation
-        Can forward the solver extra steps if needed, this is done last.
+        sends queries to solver after decision interval has been reached. Queries:
+        get_csr: get current 
         returns: (learnt obs object, reward, done, timed out, model, time since start)
         """
         if self.proc is None or self.is_finished():

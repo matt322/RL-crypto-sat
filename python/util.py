@@ -20,6 +20,42 @@ warnings.filterwarnings(
     category=UserWarning
 )
 
+def get_gnn_config(static, nlits, embed_dim, censor=2):
+    assert censor in [0, 1, 2]
+    if static:
+            config = {
+                "clause_dim":1,
+                "lit_dim":1,
+                "n_hops":0,
+                "n_layers_C_update":1,
+                "n_layers_L_update":1,
+                "n_layers_score":-1,
+                "use_embeddings":True,
+                "embed_dim":1,
+                "nlits":nlits,
+                "discrete":False,
+                "normalize":False,
+                "activation":"relu",
+                "censor":censor
+            }
+    else:
+        config = {
+                "clause_dim":32,
+                "lit_dim":32,
+                "n_hops":4,
+                "n_layers_C_update":2,
+                "n_layers_L_update":2,
+                "n_layers_score":2,
+                "use_embeddings": embed_dim > 0,
+                "nlits":nlits,
+                "discrete":False,
+                "normalize":False,
+                "activation":"relu",
+                "censor":censor
+            }
+        if embed_dim > 0:
+            config["embed_dim"] = embed_dim
+    return config
 
 def construct_sparse_tensor(obs):
         """
@@ -41,9 +77,6 @@ def construct_sparse_tensor(obs):
             )
         return res
 
-def get_assigned_vars(col_indices, nvars):
-    unique_col_indices = set(col_indices)
-    return set(range(nvars)) - (set(filter(lambda x: x < nvars, unique_col_indices)) | set(map(lambda x: x - nvars, filter(lambda x: x >= nvars, unique_col_indices))))
 
 
 
@@ -122,20 +155,27 @@ class GNNWrapper(nn.Module):
     def __init__(self, config):
         super().__init__()
         e = config.pop("use_embeddings")
+        self.censor = config.pop("censor")
+        nlits = None
         self.discrete = config.pop("discrete", False)
         if e:
             self.gnn = GNNwithEmbeddings(**config)
+            nlits = config["nlits"]
         else:
-            config.pop("nlits", None)
+            nlits = config.pop("nlits", None)
             self.gnn = rl_GNN1(**config)
         
-        self.latent_dim_pi = None 
+        self.latent_dim_pi = nlits // 2 if nlits is not None else None
         self.latent_dim_vf = None
         self.value_net = None
         self.action_net = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"GNN using device: {self.device}")
         self.gnn = self.gnn.to(self.device)
+
+    def get_assigned_vars(self, col_indices, nvars):
+        unique_col_indices = set(col_indices)
+        return set(range(nvars)) - (set(filter(lambda x: x < nvars, unique_col_indices)) | set(map(lambda x: x - nvars, filter(lambda x: x >= nvars, unique_col_indices))))
 
     def forward(self, x):
         #x = construct_sparse_tensor(x)
@@ -147,7 +187,8 @@ class GNNWrapper(nn.Module):
             p, v = self.gnn(G)
 
             col_indices = G.col_indices().squeeze().cpu().numpy().tolist()
-            empty_vars = get_assigned_vars(col_indices, nvars)
+
+            empty_vars = self.get_assigned_vars(col_indices, nvars)
 
             mask = torch.zeros(nvars, dtype=torch.bool, device=self.device)
             mask[list(empty_vars)] = True

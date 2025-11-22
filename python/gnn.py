@@ -23,7 +23,7 @@ def decode_activation(activation):
 class BasicMLP(nn.Module):
   def __init__(self, input_dim, hidden_dims, output_dim, activation, bias_at_end=True, p_dropout=0.1, **kwargs):
     super(BasicMLP, self).__init__(**kwargs)
-    layers = []
+    layers = [nn.Identity()] #added to support minimal deactivation with hidden_dims=-1
     for k in range(len(hidden_dims) + 1):
       if k == 0:
         d_in = input_dim

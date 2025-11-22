@@ -10,7 +10,7 @@ from solver_environment import SolverEnv
 from instance_generation import Instance
 from viz import var_viz
 from es_optimizer import OpenAIESOptimizer
-from util import GNNWrapper, construct_sparse_tensor
+from util import GNNWrapper, construct_sparse_tensor, get_gnn_config
 
 from torch.func import functional_call
 import numpy as np
@@ -56,7 +56,7 @@ def fitness_fn(env, model, params, seed, step_forward):
         return 0.01
     return reward
 
-def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, static, decision_period, simplify_graph, n_workers):
+def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, static, decision_period, simplify_graph, n_workers, pretrained_model=None):
     r"""
     Runs Evolution Strategies experiment
     
@@ -71,8 +71,10 @@ def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, s
         decision_period: decisions per step
         simplify_graph: eliminate assigned variables and satisfied clauses
         n_workers: for parallel computing
+        pretrained_model: path to load
     """
 
+    kwargs = locals().copy()
     print(f"starting experiment {title}")
 
     LOGDIR = "logs/es_logs/"
@@ -87,6 +89,8 @@ def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, s
     MODELPATH = LOGDIR + f"model.pt"
     FIGPATH = LOGDIR + f"fig/"
     os.makedirs(FIGPATH, exist_ok=True)
+    with open(LOGDIR + "/options.json", "w") as f:
+        f.write(json.dumps(kwargs))
 
     _make_env_config = (decision_period, simplify_graph, reward_pow)
     _fitness_fn_config = (step_forward)
@@ -100,40 +104,13 @@ def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, s
         example_obs = e.step([])[0]
         examples.append(construct_sparse_tensor(example_obs))
         
-    if static:
-            config = {
-                "clause_dim":1,
-                "lit_dim":1,
-                "n_hops":0,
-                "n_layers_C_update":1,
-                "n_layers_L_update":1,
-                "n_layers_score":1,
-                "use_embeddings":True,
-                "embed_dim":1,
-                "nlits":nlits,
-                "discrete":False,
-                "normalize":False,
-                "activation":"relu"
-            }
-    else:
-        config = {
-                "clause_dim":32,
-                "lit_dim":16,
-                "n_hops":2,
-                "n_layers_C_update":3,
-                "n_layers_L_update":3,
-                "n_layers_score":1,
-                "use_embeddings": embed_dim > 0,
-                "nlits":nlits,
-                "discrete":False,
-                "normalize":False,
-                "activation":"relu"
-            }
-        if embed_dim > 0:
-            config["embed_dim"] = embed_dim
-
+    config = get_gnn_config(static, nlits, embed_dim)
     model = GNNWrapper(config)
     model.latent_dim_pi = nlits // 2
+
+    if pretrained_model is not None:
+        model.load_state_dict(torch.load(pretrained_model))
+
     print(f"Paramters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
 
     optimizer = OpenAIESOptimizer(
@@ -151,7 +128,7 @@ def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, s
     info = {}
     for i in range(steps):
         info = optimizer.step()   
-        if i % 50 == 0:
+        if i % 100 == 0:
             for j, example_obs in enumerate(examples):
                 pred = model(example_obs)[0]
                 var_viz("cnf/sha1_21round.cnf", pred.detach().cpu().numpy().squeeze(), path=FIGPATH + f"es_{title}_gen_{i}_example_{j}.png", title="")
@@ -176,30 +153,45 @@ def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, s
 
 if __name__ == "__main__":
     n_workers = 64
+
     run_experiment(
-        title="static_noadvance_alpha=0",
-        steps=1000,
-        popsize=128,
+        title="static_noadvance_alpha=0_longperiod",
+        steps=2000,
+        popsize=256,
         reward_pow=0,
         step_forward=0,
-        embed_dim=0,
+        embed_dim=4,
         static=True,
-        decision_period=10000,
+        decision_period=50000,
         simplify_graph=True,
         n_workers=n_workers,
+        pretrained_model="logs/es_logs/static_noadvance_alpha=0_5/model.pt"
     )
+
+    # run_experiment(
+    #     title="gnn_embed_advance_alpha=0",
+    #     steps=4000,
+    #     popsize=512,
+    #     reward_pow=0,
+    #     step_forward=20000,
+    #     embed_dim=4,
+    #     static=False,
+    #     decision_period=10000,
+    #     simplify_graph=True,
+    #     n_workers=n_workers,
+    # )
     
-    run_experiment(
-        title="static_advance_alpha=0",
-        steps=1000,
-        popsize=128,
-        reward_pow=0,
-        step_forward=20000,
-        embed_dim=0,
-        static=True,
-        decision_period=10000,
-        simplify_graph=True,
-        n_workers=n_workers,
-    )
+    # run_experiment(
+    #     title="gnn_noembed_advance_alpha=0",
+    #     steps=4000,
+    #     popsize=512,
+    #     reward_pow=0,
+    #     step_forward=20000,
+    #     embed_dim=0,
+    #     static=False,
+    #     decision_period=10000,
+    #     simplify_graph=True,
+    #     n_workers=n_workers,
+    # )
 
 
