@@ -67,38 +67,40 @@ def var_viz(cnf, values, path=None, title=None, null_vals=[-float("inf"), 0.0]):
         if line.startswith('c xor4'):
             break
 
-    fig, axs = plt.subplots(4, 1, figsize=(8, 10), gridspec_kw={'height_ratios': [len(w), len(h_in), len(h_out), len(a)]})
+    fig, axs = plt.subplots(2, 2, figsize=(14, 6), gridspec_kw={'height_ratios': [len(w), len(h_in)]})
+    plt.subplots_adjust(left=-0.3)
     
     norm = plt.Normalize(vmin=min(filtered_vals), vmax=max(filtered_vals))
     sm = plt.cm.ScalarMappable(cmap='inferno', norm=norm)
     sm.set_array([])
-    cbar = plt.colorbar(sm, ax=axs, orientation='vertical', fraction=0.02, pad=0.04)
-    cbar.ax.set_position([0.05, 0.1, 0.02, 0.8])  # Adjust the position of the colorbar
+    cbar = plt.colorbar(sm, ax=axs, orientation='vertical', fraction=0.02, pad=0.05)
+    cbar.ax.set_position([0.05, 0.1, 0.50, 0.8])  # Adjust the position of the colorbar
     cbar.set_label('Value Range')
    
     # Plot w
-    axs[0].imshow(np.array(w), cmap='inferno')
-    axs[0].set_title('Message Schedule (w)')
-    axs[0].set_xticks(range(0, 32, 2))
-    axs[0].set_yticks(range(len(w)))
+    axs[0][0].imshow(np.array(w), cmap='inferno')
+    axs[0][0].set_title('Message Schedule (w)')
+    axs[0][0].set_xticks(range(0, 32, 2))
+    axs[0][0].set_yticks(range(len(w)))
+
 
     # Plot h_in
-    axs[1].imshow(np.array(h_in), cmap='inferno')
-    axs[1].set_title('Input Hash (h_in)')
-    axs[1].set_xticks(range(0, 32, 2))
-    axs[1].set_yticks(range(len(h_in)))
+    axs[1][0].imshow(np.array(h_in), cmap='inferno')
+    axs[1][0].set_title('Input Hash (h_in)')
+    axs[1][0].set_xticks(range(0, 32, 2))
+    axs[1][0].set_yticks(range(len(h_in)))
 
     # Plot h_out
-    axs[2].imshow(np.array(h_out), cmap='inferno')
-    axs[2].set_title('Output Hash (h_out)')
-    axs[2].set_xticks(range(0, 32, 2))
-    axs[2].set_yticks(range(len(h_out)))
+    axs[1][1].imshow(np.array(h_out), cmap='inferno')
+    axs[1][1].set_title('Output Hash (h_out)')
+    axs[1][1].set_xticks(range(0, 32, 2))
+    axs[1][1].set_yticks(range(len(h_out)))
 
     # Plot a
-    axs[3].imshow(np.array(a), cmap='inferno')
-    axs[3].set_title('Auxiliary Variables (a)')
-    axs[3].set_xticks(range(0, 32, 2))
-    axs[3].set_yticks(range(len(a)))
+    axs[0][1].imshow(np.array(a), cmap='inferno')
+    axs[0][1].set_title('Auxiliary Variables (a)')
+    axs[0][1].set_xticks(range(0, 32, 2))
+    axs[0][1].set_yticks(range(len(a)))
 
     plt.tight_layout()
     if title:
@@ -118,6 +120,9 @@ def EMA(data, d=0.9):
 
 
 if __name__ == "__main__":
+    vals = np.array(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze() 
+    var_viz("cnf/sha1_21round.cnf", vals, title="")
+
     rewards = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="cumulative_reward"))
     stepcounts = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="steps"))
     fitness = np.array(extract("logs/static_noadvance_alpha=0_5/log.jsonl", lambda x: True, key="return_mean"))

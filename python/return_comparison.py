@@ -76,8 +76,9 @@ def mean_and_conf(trajectories, confidence = 0.95):
 
 
 if __name__ == "__main__":
-    decisions = 5000
+    decisions = 20000
     env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=2)
+    hybrid_env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=2, heuristic_type="hybrid", hybrid_period=4000)
     gnn_config = get_gnn_config(static=True, nlits=env.nvars * 2, embed_dim=4)
     
     model = GNNWrapper(gnn_config)
@@ -92,36 +93,27 @@ if __name__ == "__main__":
     random_baseline = lambda x: np.random.uniform(0, 1, env.nvars)
     zero_baseline = lambda x: np.ones(env.nvars) * 1e-8
 
-    nsteps = 60
+    nsteps = 20
 
     model_samples_x, model_samples_y = [], []
     vbase_samples_x, vbase_samples_y = [], []
     model_samples_x, model_samples_y = [], []
-    for i in range(20):
+    for i in range(10):
         print("getting model samples")
-        #samples = sample_periodically(env, static_model, nsteps)
-        samples = sample_returns_within_period(env, static_scores_a2, 15, 4)
+        samples = sample_returns_within_period(env, static_scores_a2, nsteps, 1)
         model_samples_y.append(samples)
         
         print("getting static samples")
-        samples = sample_returns_within_period(env, vanilla_baseline, nsteps, 1)
+        samples = sample_returns_within_period(hybrid_env, static_scores_a2, nsteps, 1)
         vbase_samples_y.append(samples)
 
-        # vbase_samples_x += list(range(0, decisions*len(samples), decisions))
-        # plt.plot(range(0, decisions*len(samples), decisions), samples, color="orange", label = "vanilla solver" if  i == 0 else "")
-
-        # print("getting random samples")
-        # samples = sample_returns_within_period(env, random_baseline, nsteps, 10)
-        # vbase_samples_y += samples
-        # vbase_samples_x += list(range(0, decisions*len(samples), decisions))
-        # plt.plot(range(len(samples)), samples, color="red", label = "random baseline" if  i == 0 else "")
 
     model_mean, model_conf = mean_and_conf(model_samples_y)
-    plt.plot(range(0, decisions*len(samples), decisions), model_mean, color="blue", label = "static variable scores")
+    plt.plot(range(0, decisions*len(samples), decisions), model_mean, color="blue", label = "periodic refocusing")
     plt.fill_between(range(0, decisions*len(samples), decisions), model_mean-model_conf, model_mean+model_conf, color='blue', alpha=0.2, label='95% CI')
 
     baseline_mean, baseline_conf = mean_and_conf(vbase_samples_y)
-    plt.plot(range(0, decisions*len(samples), decisions), baseline_mean, color="green", label = "vanilla solver")
+    plt.plot(range(0, decisions*len(samples), decisions), baseline_mean, color="green", label = "hybrid activity scores")
     plt.fill_between(range(0, decisions*len(samples), decisions), baseline_mean-baseline_conf, baseline_mean+baseline_conf, color='green', alpha=0.2)
 
     # plt.plot(range(0, decisions*len(samples), decisions), samples, color="blue", label = "starting with model scores" if  i == 0 else "")

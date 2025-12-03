@@ -137,7 +137,7 @@ static BoolOption opt_forceunsat(_cat,"forceunsat","Force the phase for UNSAT",t
 Solver::Solver() :
 
 // Parameters (user settable):
-//
+//MODIFICATIONS
 decision_limit(0)
 , simplify_clauses(false)
 , reward_pow(2)
@@ -657,12 +657,12 @@ Lit Solver::pickBranchLit() {
 
     // Activity based decision:
     while(next == var_Undef || value(next) != l_Undef || !decision[next])
-        if(order_heap.empty()) {
-            next = var_Undef;
-            break;
-        } else {
-            next = order_heap.removeMin();
-        }
+            if(order_heap.empty()) {
+                next = var_Undef;
+                break;
+            } else {
+                next = order_heap.removeMin();
+            }
 
     if(randomize_on_restarts && !fixed_randomize_on_restarts && newDescent && (decisionLevel() % 2 == 0)) {
         return mkLit(next, (randomDescentAssignments >> (decisionLevel() % 32)) & 1);
@@ -1447,7 +1447,15 @@ printf("c reinitialization of all variables activity/phase/learnt clauses.\n");
 |    all variables are decision variables, this means that the clause set is satisfiable. 'l_False'
 |    if the clause set is unsatisfiable. 'l_Undef' if the bound on number of conflicts is reached.
 |________________________________________________________________________________________________@*/
-lbool Solver::search(int nof_conflicts, int &last_decisions, int &forward, double &cum_reward) {
+lbool Solver::search(int nof_conflicts, 
+            int &last_decisions, 
+            int &forward,
+            double &cum_reward, 
+            vec<double>& activity_copy, 
+            double &var_inc_copy, 
+            int &static_decisions, 
+            bool &use_static_scores) {
+    
     assert(ok);
     int backtrack_level;
     int conflictC = 0;
@@ -1585,16 +1593,28 @@ lbool Solver::search(int nof_conflicts, int &last_decisions, int &forward, doubl
         } else {
            // MODIFICATION decision limit
             int period_decisions = decisions - last_decisions;
-            if (decision_limit != 0 && (decisions == 0 || period_decisions >= decision_limit && period_decisions >= forward)) {
-                double reward = decisions > 0 ? cum_reward/period_decisions : 0.0;
-                cum_reward = 0.0;
-                last_decisions = decisions;
-                printf("m reward %f\n",  reward);
-                fflush(stdout);
-                if (decisions > 0) {
-                    writeCSRToSharedMem(2);  
+            if (use_static_scores && period_decisions >= static_decisions){
+                use_static_scores = false;
+                activity_copy.copyTo(activity);
+                var_inc = var_inc_copy;
+            }
+
+            if (decision_limit != 0 && (decisions == 0 || (period_decisions >= decision_limit && period_decisions >= forward))) {
+                if (decisions == 0){
+                    waitForActivityScores(var_inc_copy, activity_copy, use_static_scores, forward, static_decisions);
+                } else {
+                    double reward = decisions > 0 ? cum_reward/period_decisions : 0.0;
+                    cum_reward = 0.0;
+                    last_decisions = decisions;
+                    printf("m reward %f\n",  reward);
+                    fflush(stdout);
+                    if (decisions > 0) {
+                        writeCSRToSharedMem(2);  
+                    }
+                    printf("m step done\n");
+                    fflush(stdout);
+                    waitForActivityScores(var_inc_copy, activity_copy, use_static_scores, forward, static_decisions);
                 }
-                forward = waitForActivityScores();
             }
 
 
@@ -1805,10 +1825,25 @@ lbool Solver::solve_(bool do_simp, bool turn_off_simp) // Parameters are useless
     int last_decisions = 0;
     int forward = 0;
     double cum_reward = 0.0;
+    vec<double> activity_copy;
+    double var_inc_copy = 0.0;
+    activity.copyTo(activity_copy);
+    int static_decisions = 0;
+    bool use_static_scores = false;
+
+
 
     while(status == l_Undef) {
         status = search(
-                luby_restart ? luby(restart_inc, curr_restarts) * luby_restart_factor : 0, last_decisions, forward, cum_reward); // the parameter is useless in glucose, kept to allow modifications
+                luby_restart ? luby(restart_inc, curr_restarts) * luby_restart_factor : 0, 
+                last_decisions, 
+                forward, 
+                cum_reward, 
+                activity_copy, 
+                var_inc_copy,
+                static_decisions, 
+                use_static_scores
+            ); // the parameter is useless in glucose, kept to allow modifications
 
         if(!withinBudget()) break;
         curr_restarts++;
@@ -2044,57 +2079,17 @@ void Solver::parallelImportClauseDuringConflictAnalysis(Clause &, CRef ) {
 //=================================================================================================
 //MODIFICATIONS
 
-void Solver::writeClauses(bool onlyLearnts, int verb) {
-    auto start = std::chrono::high_resolution_clock::now();
-    vec<CRef>& outputClauses = onlyLearnts ? learnts : clauses;
-    std::string clause_type = onlyLearnts ? "learnt" : "fixed";
-    int totallits = 0;
-    std::string buffer;
-    buffer.reserve(50ull * 1024 * 1024); 
-
-    buffer.append("m ");
-    buffer.append(clause_type);
-    buffer.append(" start\n");
-
-    for (int i = 0; i < outputClauses.size(); i++) {
-        const Clause& c = ca[outputClauses[i]];
-        buffer.push_back('l');
-        for (int j = 0; j < c.size(); j++) {
-            totallits++;
-            int lit_val = (var(c[j]) + 1) * (-2 * sign(c[j]) + 1);
-            buffer.push_back(' ');
-            buffer.append(std::to_string(lit_val));
-        }
-        buffer.push_back('\n');
-    }
-
-    buffer.append("m ");
-    buffer.append(clause_type);
-    buffer.append(" done\n");
-    auto buildTime = std::chrono::high_resolution_clock::now();
-
-    FILE* out = stdout;
-    fwrite(buffer.data(), 1, buffer.size(), out);
-    fflush(out);
-
-   if (verb > 1) {
-        printf("c written %d %s clauses with total %d literals.\n",
-            (int)outputClauses.size(),
-            clause_type.c_str(),
-            totallits);
-
-        printf("c clause build time: %lldms\n",
-            (long long)std::chrono::duration_cast<std::chrono::milliseconds>(buildTime - start).count());
-    }
-
-    if (verb > 0) {
-        auto writeTime = std::chrono::high_resolution_clock::now();
-        printf("c clause write time: %lldms\n",
-            (long long)std::chrono::duration_cast<std::chrono::milliseconds>(writeTime - start).count());
-    }
-}
-
 void Solver::writeCSRToSharedMem(int verb) { //writes crow_indices and col_indices to shared memory. Values and padding done in python
+    printf("m csr ready\n");
+    fflush(stdout);
+    std::string line;
+    while (getline(std::cin, line)) {
+        if (line.empty()) continue;
+        if (line == "m csr no") return;
+        if (line == "m csr yes") break;
+        throw std::runtime_error("c invalid line in write csr: " + line);
+    }
+
     std::vector<int> crow_indices = {0};
     std::vector<int> col_indices;
 
@@ -2108,7 +2103,7 @@ void Solver::writeCSRToSharedMem(int verb) { //writes crow_indices and col_indic
     int fixed_clauses = clauses.size();
 
     for (int i = 0; i < n_clauses; i++) {
-        const Clause& c = i < fixed_clauses ? ca[clauses[i]] : ca[learnts[i - fixed_clauses ]];
+        const Clause& c = i < fixed_clauses ? ca[clauses[i]] : ca[learnts[i - fixed_clauses]];
         if (simplified && satisfied(c)) {
             continue;
         }
@@ -2189,8 +2184,6 @@ void Solver::writeCSRToSharedMem(int verb) { //writes crow_indices and col_indic
         exit(1);
     }
 
-
-
     auto ackTime = std::chrono::high_resolution_clock::now();
     if (verb > 0) {
         printf("c shared memory write time: %lldms\n",
@@ -2202,13 +2195,29 @@ void Solver::writeCSRToSharedMem(int verb) { //writes crow_indices and col_indic
 
 }
 
-int Solver::waitForActivityScores() {
-    printf("m activity start\n");
+void Solver::waitForActivityScores(double &var_inc_copy, vec<double> &activity_copy, bool &use_static_scores, int &forward, int &hybrid_period) { //controller specifies a refocus or hybrid. In the former case the activity vector is changed, 
+    printf("m activity start\n");                                                                               //in the latter it is changed with variable bump disabled, the activity vector is copied, and the activity and increment are restored after n decisions.
     fflush(stdout);
     std::string line;
     while (getline(std::cin, line)) {
         if (line.empty()) continue;
-        if (line == "m done") break;
+        if (line == "m activity done") break;
+        if (line == "m scores static"){
+            use_static_scores = true;
+            activity.copyTo(activity_copy);
+            continue;
+        }
+        else if (line == "m scores vsids"){
+            continue;
+        }
+        else if (line.substr(0, 18) == "m static_decisions"){
+            std::istringstream iss(line);
+            std::string m_token, cmd;
+            if (!(iss >> m_token >> cmd >> hybrid_period) || m_token != "m" || cmd != "static_decisions") {
+                throw std::runtime_error("Invalid command while waiting for static score period " + line);
+            }
+            continue;
+        }
 
         int idx;
         double val;
@@ -2221,20 +2230,23 @@ int Solver::waitForActivityScores() {
         }
         activity[idx] = val;
     }
+    
     rebuildOrderHeap();
-    var_inc = 1;
-
+    var_inc_copy = var_inc;
+    var_inc = use_static_scores ? 0 : 1;
 
     while (getline(std::cin, line)) {
         if (line.empty()) continue;
-        if (line == "m continue") return 0;
-        int forward;
+        if (line == "m continue") {
+            forward = 0;
+            return;
+        }
         std::istringstream iss(line);
         std::string m_token, cmd;
         if (!(iss >> m_token >> cmd >> forward) || m_token != "m" || cmd != "forward") {
             throw std::runtime_error("Invalid command while waiting for forward " + line);
         }
         printf("c received forward %d\n", forward);
-        return forward;
+        break;
     }
 }

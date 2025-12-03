@@ -18,7 +18,7 @@ class SolverController:
         self.proc = None
         self._stop = False
         
-    def start(self, cnf_inst, decisions_per_callback=200000, simplify_clauses=False, timeout_secs=2**31, reward_pow = 2, args = [], verb=0):
+    def start(self, cnf_inst, decisions_per_callback=0, simplify_clauses=False, get_csr=True, timeout_secs=2**31, reward_pow = 2, args = [], verb=0):
         self.verb=verb
         self.stop()
         self._stop = False
@@ -55,24 +55,30 @@ class SolverController:
             self.debug_lines.append(line)
             if self.verb > 3:
                 print(line)
-            if line.startswith("c "):
+            if line.startswith("c"):
                 continue
-            if line.startswith("m "):
-                if line.startswith("m shared_mem name"):
+            elif line.startswith("m "):
+                if line == "m csr ready":
+                    self.writer.write(f"m csr {"yes" if get_csr else "no"}\n")
+                    self.writer.flush()
+
+                elif line.startswith("m shared_mem name"):
+                    assert get_csr
                     self.shm_name = line.split(" ")[3][1:]
-                if line.startswith("m csr written"):
-                    if self.verb > 1:
-                        print(f"Reading CSR from shared memory: {self.shm_name}")
+
+                elif line.startswith("m csr written"):
+                    assert get_csr
                     csr = self.read_from_shared_mem(self.shm_name)
                     if self.verb > 1:
-                        print(f"Read {csr['n_clauses']} clauses from shared memory")
-                    self.fixed_clauses = csr
+                        print(f"Read {csr["n_clauses"]} clauses from {self.shm_name}")
                     return csr, 0, False, False, None, time.time() - self.start_time
-            elif line.startswith("v "):
+
+            elif line.startswith("s ") or line.startswith("v "):
                 if self.verb > 1:
                     print(line)
                 self.stop()
                 return None, 1, True, False, line.split(" ")[1:], time.time() - self.start_time 
+            
         print(f"Solver exited unexpectedly in start(): poll returned {self.proc.poll()}")
         for errline in self.err:
             print(f"ERR: {errline.strip()}")
@@ -95,24 +101,20 @@ class SolverController:
     def is_finished(self):
         return self._stop
 
-    def step(self, activity_scores=None, go_ahead=None):
+    def step(self, activity_scores, go_ahead=None, get_csr=True, heuristic_type="refocus", static_score_decisions=0):
         """
-        sends queries to solver after decision interval has been reached. Queries:
-        get_csr: get current 
+        sends queries to solver after decision interval has been reached. activity score action -> go forward -> solver runs -> read csr and reward
         returns: (learnt obs object, reward, done, timed out, model, time since start)
         """
+
         if self.proc is None or self.is_finished():
             raise RuntimeError("Process not started; call start() first")
 
         self.total_learnts = 0
         csr = None
         reward = None
-            
-        reward = 0
-        did_action = False
         start_step_time = time.time()
         
-
         if time.time() - self.start_time > self.timeout_secs:
             if self.verb > 0:
                 print("Timeout reached, stopping solver")
@@ -125,28 +127,47 @@ class SolverController:
             if line.startswith("m "):
                 if self.verb > 2:
                     print(line)
-                if line == "m activity start":
-                    if self.verb > 2:
-                        print("Calculating activities...")
-                    if activity_scores is None:
-                        raise RuntimeError("Activity scores expected but not provided")
-                    for i in activity_scores:
-                        self.writer.write(i + "\n")
-                    self.writer.write("m done\n")
-                    self.writer.flush()
-                    did_action = True
-                    if go_ahead is not None:
-                        assert isinstance(go_ahead, int) and go_ahead > 0
-                        self.writer.write(f"m forward {go_ahead}\n")
+                if line == "m activity start": 
+                    if heuristic_type == "refocus":
+                        self.writer.write("m scores vsids\n") #specify array to write to
+                        for i in activity_scores:
+                            self.writer.write(i + "\n")
+                        self.writer.write("m activity done\n")
                         self.writer.flush()
-                    else:
-                        self.writer.write(f"m continue\n")
+                        
+                    elif heuristic_type == "hybrid":
+                        self.writer.write("m scores static\n")
+                        for i in activity_scores:
+                            self.writer.write(i + "\n")
+                        self.writer.write(f"m static_decisions {static_score_decisions}\n")
+                        self.writer.write("m activity done\n")
                         self.writer.flush()
 
+                    else:
+                        raise ValueError("Heuristic type unknown")
+                    
+                    if go_ahead is not None:
+                            assert isinstance(go_ahead, int) and go_ahead > 0
+                            self.writer.write(f"m forward {go_ahead}\n")
+                            self.writer.flush()
+                    else:
+                            self.writer.write(f"m continue\n")
+                            self.writer.flush()
+                
+                elif line == "m step done":
+                    assert (csr is not None or not get_csr) and reward is not None, "step done recieved before obs or reward"
+                    return csr, reward, False, False, None, time.time() - start_step_time
+
+                elif line == "m csr ready":
+                    self.writer.write(f"m csr {"yes" if get_csr else "no"}\n")
+                    self.writer.flush()
+
                 elif line.startswith("m shared_mem name"):
+                    assert get_csr
                     self.shm_name = line.split(" ")[3][1:]
 
                 elif line.startswith("m csr written"):
+                    assert get_csr
                     csr = self.read_from_shared_mem(self.shm_name)
                     if self.verb > 1:
                         print(f"Read {csr["n_clauses"]} clauses from {self.shm_name}")
@@ -166,9 +187,9 @@ class SolverController:
             else:
                 if self.verb > 0:
                     print(line)
-            if did_action and csr is not None and reward is not None:
-                return csr, reward, False, False, None, time.time() - start_step_time
+
         print(f"Solver exited unexpectedly in step: poll returned {self.proc.poll()}")
+        print(f"Last line: {self.debug_lines[-1]}")
         if self.verb > 1:
             for errline in self.err:
                 print(f"ERR: {errline.strip()}")
@@ -234,10 +255,19 @@ def verify_activity_scores():
     solver.start(cnf, 10000, verb=0)
     assert solver.step(scores)[2] == True
 
+def verify_hybrid():
+    inst = Instance()
+    cnf = inst.generate(seed = 41, guarantee_soln=True)
+    scores = [f"{i} {1 if v < 0 else 0}" for i,v in enumerate(cnf[1])]
+    solver = SolverController()
+    solver.start(cnf, 10000, verb=0)
+    assert solver.step(scores, heuristic_type="hybrid", static_score_decisions=4000)[2] == True
+
 
 if __name__ == "__main__":
     verify_activity_scores()
-    
+    verify_hybrid()
+
     inst = Instance(rounds=21)
     solver = SolverController()
     cnf = inst.generate(seed=41)
@@ -247,8 +277,8 @@ if __name__ == "__main__":
     solver.start(cnf, 10000, timeout_secs=40, verb=4, simplify_clauses=True, reward_pow=2)
     yappi.stop()
     yappi.get_func_stats().print_all()
-    exit()
-    print(solver.step(solver.zero_scores(), go_ahead=500000)[1])
+ 
+    print(solver.step(solver.zero_scores(), go_ahead=50000)[1])
     for i in range(5):
         print(solver.step(solver.zero_scores())[0]["n_clauses"])
 

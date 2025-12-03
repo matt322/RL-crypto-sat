@@ -20,6 +20,8 @@ class SolverEnv(gym.Env):
                  guarantee_soln = True,
                  filter_scores = False,
                  reward_pow = 2.0, #2 = (cumulative) Neuroglue reward, 0 = local learning rate
+                 heuristic_type = "refocus",
+                 hybrid_period = 0,
                  logfile="logs/episode_log.jsonl"):
         super().__init__()
         self.free_outputs = free_outputs
@@ -31,6 +33,9 @@ class SolverEnv(gym.Env):
         self.guarantee_soln = guarantee_soln
         self.single_inst = single_inst
         self.filter_scores = filter_scores
+        self.reward_pow = reward_pow
+        self.heuristic_type = heuristic_type
+        self.hybrid_period = hybrid_period
         self.cnf = cnf
         if self.cnf is None:
             self.sha1_instance = Instance(rounds=rounds)
@@ -90,6 +95,7 @@ class SolverEnv(gym.Env):
             timeout_secs=200, 
             verb=self.verb - 2,
             simplify_clauses=self.simplify_graph,
+            reward_pow=self.reward_pow
         )
         if obs is None:
             print(reward, model)
@@ -123,7 +129,7 @@ class SolverEnv(gym.Env):
             scores = [f"{i} {score * mult * self.score_multiplier}" for i, score in filter(lambda x: x[1] not in [0.0, -float("inf")], enumerate(action))]
         else:
             scores = [f"{i} {score * mult * self.score_multiplier}" for i, score in enumerate(action)]
-        learnt, reward, done, truncated, model, time = self.solver.step(activity_scores=scores)
+        learnt, reward, done, truncated, model, time = self.solver.step(activity_scores=scores, heuristic_type=self.heuristic_type, static_score_decisions=self.hybrid_period)
         truncated = truncated or step_truncated
 
         self.episode_log_dict["steps"] += 1
