@@ -8,8 +8,6 @@ from util import construct_sparse_tensor
 
 class OpenAIESOptimizer:
     """
-    OpenAI Evolution Strategies (ES) optimizer that keeps separate envs per worker.
-
     Args:
         dim (int): Dimension of the parameter vector.
         make_env_fn (callable): A function that returns a new environment instance.
@@ -21,7 +19,7 @@ class OpenAIESOptimizer:
     """
 
     def __init__(self, model, make_env_fn, make_env_args, fitness_fn, fitness_args,
-                 sigma=0.1, lr=0.01, popsize=128, n_workers=None):
+                 sigma=0.1, lr=0.01, popsize=128, n_workers=None, use_rank_transform=False):
 
         assert popsize % 2 == 0, "popsize must be even for antithetic sampling"
         self.make_env_fn = make_env_fn
@@ -35,6 +33,7 @@ class OpenAIESOptimizer:
         self.model = model
         self.n_workers = n_workers
         self.optimizer = Adam(model.parameters(), lr=lr)
+        self.use_rank_transform = use_rank_transform
 
         theta = self.flatten_params(self.model)
         self.dim = theta.numel()
@@ -97,6 +96,12 @@ class OpenAIESOptimizer:
     def make_env(self):
         return SolverEnv(rounds=21, decisions_per_callback=10000, free_outputs=0, simplify_graph=True, single_inst=False, verb=0, normalize_actions = False)
 
+    def rank_transform(self, fitness):
+        order = fitness.argsort()
+        ranks = torch.zeros_like(order, device=fitness.device, dtype=fitness.dtype)
+        ranks[order] = torch.max(torch.tensor(0), (torch.linspace(-1, 1, len(fitness))))
+        return ranks
+    
     def get_grad_est(self):
         """Perform one ES update step."""
         theta = self.flatten_params(self.model)
@@ -120,11 +125,14 @@ class OpenAIESOptimizer:
             fitness = [self.fitness_fn(self.env, *x) for x in argslist]
 
         fitness = torch.tensor(fitness) 
-        
-        fit_norm = -(fitness - fitness.mean()) / (fitness.std() + 1e-8) #negating here since using adam
-        grad_est = (eps.T @ fit_norm) / (self.popsize * self.sigma)
-        
 
+        if self.use_rank_transform:
+            fit_norm = self.rank_transform(fitness)
+        else:
+            fit_norm = -(fitness - fitness.mean()) / (fitness.std() + 1e-8) #negating here since using adam
+        
+        grad_est = (eps.T @ fit_norm) / (self.popsize * self.sigma)
+            
         self._gen += 1
 
         return {
@@ -155,5 +163,7 @@ class OpenAIESOptimizer:
         if self._pool is not None:
             self._pool.close()
             self._pool.join()
+
+
 
 

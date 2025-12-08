@@ -5,7 +5,6 @@ import json
 from solver_eval import generate_dataset
 
 
-
 if __name__ == "__main__":
     data = generate_dataset()
     vanilla_solver_log = "logs/es_logs/vanilla_runtimes.jsonl"

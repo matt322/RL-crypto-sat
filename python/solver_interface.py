@@ -182,8 +182,14 @@ class SolverController:
                 if self.verb > 1:
                     print(line)
                 self.stop()
-                return None, 1, True, False, line.split(" ")[1:], time.time() - start_step_time # solve reward
-
+                return None, 1 if reward is None else reward, True, False, line.split(" ")[1:], time.time() - start_step_time # solve reward
+            
+            elif line.startswith("s "): #timed out
+                if self.verb > 1:
+                    print(line)
+                self.stop()
+                return None, 0 if reward is None else reward, True, True, line.split(" ")[1:], time.time() - start_step_time # solve reward
+            
             else:
                 if self.verb > 0:
                     print(line)
@@ -196,7 +202,7 @@ class SolverController:
             for debugline in self.debug_lines:
                 print(f"DBG: {debugline}")
         self.stop()
-        return None, 0, True, True, None, time.time() - start_step_time #process exited
+        return None, 0 if reward is None else reward, True, True, None, time.time() - start_step_time #process exited
 
 
     def read_from_shared_mem(self, shm_name):
@@ -274,13 +280,15 @@ if __name__ == "__main__":
     yappi.clear_stats()
     yappi.set_clock_type("wall")
     yappi.start()
-    solver.start(cnf, 10000, timeout_secs=40, verb=4, simplify_clauses=True, reward_pow=2)
+    solver.start(cnf, 500000, timeout_secs=40, verb=0, simplify_clauses=True, reward_pow=0)
     yappi.stop()
     yappi.get_func_stats().print_all()
- 
-    print(solver.step(solver.zero_scores(), go_ahead=50000)[1])
-    for i in range(5):
-        print(solver.step(solver.zero_scores())[0]["n_clauses"])
+    timetot = 0
+    while not solver.is_finished():
+        _, r, _, _, _, t = solver.step([])
+        timetot += t
+        print(f"Step reward: {r}")
+    print(f"Total time: {timetot}")
 
    
     

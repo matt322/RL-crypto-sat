@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import json
 import numpy as np
+from scipy.stats import t
 
 def extract(file, condition, key="time"):
     res = []
@@ -117,35 +118,54 @@ def EMA(data, d=0.9):
         res.append(res[-1] * d + i * (1 - d))
     return res
 
+def mean_and_conf(trajectories, confidence = 0.95):
+    maxlen = max(map(lambda x: len(x), trajectories))
+    data = [[x for x in t if x is not None] for t in zip(*map(lambda x: x + [None] * (maxlen - len(x)), trajectories))]
+    mres, cres = [], []
+    for i in data:
+        z = t.ppf(1 - (1 - confidence) / 2, df=len(i)-1)
+        mres.append(np.mean(i))
+        cres.append(z * np.std(i, ddof=1) / np.sqrt(len(i)))
+    return np.array(mres), np.array(cres)
+
+def decision_efficiency(llrs, period=50000):
+    maxlen = max([len(i) for i in llrs])
+    meanplot, conf = mean_and_conf(llrs)
+    plt.plot(range(0, period*maxlen, period), meanplot, color="green", label = "mean llr")
+    plt.fill_between(range(0, period*maxlen, period), meanplot-conf, meanplot+conf, color='green', alpha=0.2)
+    for i in llrs:
+        plt.axvline(x=len(i)*period, color='red', linestyle='-', alpha=0.5)
+    plt.show()
+
 
 
 if __name__ == "__main__":
-    vals = np.array(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze() 
-    var_viz("cnf/sha1_21round.cnf", vals, title="")
+    llrs = extract("logs/vanilla_eval.jsonl", lambda x: True, key="llr")
+    decision_efficiency(llrs, period=50000)
+    # vals = np.array(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze() 
+    # #var_viz("cnf/sha1_21round.cnf", vals, title="")
 
-    rewards = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="cumulative_reward"))
-    stepcounts = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="steps"))
-    fitness = np.array(extract("logs/static_noadvance_alpha=0_5/log.jsonl", lambda x: True, key="return_mean"))
-    fitness = EMA(fitness)
-    plt.plot(fitness)
-    plt.xlabel("Step")
-    plt.ylabel("Mean Fitness")
-    plt.title("Evolution strategies mean reward over time")
-    plt.show()
+    # rewards = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="cumulative_reward"))
+    # stepcounts = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="steps"))
+    # fitness = np.array(extract("logs/static_noadvance_alpha=0_5/log.jsonl", lambda x: True, key="return_mean"))
+    # fitness = EMA(fitness)
+    # plt.plot(fitness)
+    # plt.xlabel("Step")
+    # plt.ylabel("Mean Fitness")
+    # plt.title("Evolution strategies mean reward over time")
+    # plt.show()
 
-    plt.plot(rewards/stepcounts)
-    plt.xlabel("Episode")
-    plt.ylabel("Average Reward per Step")
-    plt.title("PPO Branching Heuristic Average Reward per Step")
-    plt.show()
+    # plt.plot(rewards/stepcounts)
+    # plt.xlabel("Episode")
+    # plt.ylabel("Average Reward per Step")
+    # plt.title("PPO Branching Heuristic Average Reward per Step")
+    # plt.show()
 
-    es_times = extract("logs/es_logs/es_initialization_runtimes_5.jsonl", lambda x: True)
-    es_times_2 = extract("logs/es_logs/es_initialization_runtimes_3.jsonl", lambda x: True)
-    vanilla_times = extract("logs/es_logs/vanilla_runtimes.jsonl", lambda x: True)
+    es_times = extract("logs/refocus_eval_static_a=2.jsonl", lambda x: True)
+    vanilla_times = extract("logs/vanilla_eval.jsonl", lambda x: True)
 
     cumulative_plot([
         ("Vanilla Solver", vanilla_times, 200),
-        ("ES Initialized Solver", es_times_2, 200),
         ("ES Initialized Solver one instance", es_times, 200),
     ])
     plt.scatter(vanilla_times, es_times)

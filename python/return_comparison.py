@@ -76,8 +76,8 @@ def mean_and_conf(trajectories, confidence = 0.95):
 
 
 if __name__ == "__main__":
-    decisions = 20000
-    env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=2)
+    decisions = 10000
+    env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=0)
     hybrid_env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=2, heuristic_type="hybrid", hybrid_period=4000)
     gnn_config = get_gnn_config(static=True, nlits=env.nvars * 2, embed_dim=4)
     
@@ -104,7 +104,7 @@ if __name__ == "__main__":
         model_samples_y.append(samples)
         
         print("getting static samples")
-        samples = sample_returns_within_period(hybrid_env, static_scores_a2, nsteps, 1)
+        samples = sample_returns_within_period(env, vanilla_baseline, nsteps, 1)
         vbase_samples_y.append(samples)
 
 
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     plt.fill_between(range(0, decisions*len(samples), decisions), model_mean-model_conf, model_mean+model_conf, color='blue', alpha=0.2, label='95% CI')
 
     baseline_mean, baseline_conf = mean_and_conf(vbase_samples_y)
-    plt.plot(range(0, decisions*len(samples), decisions), baseline_mean, color="green", label = "hybrid activity scores")
+    plt.plot(range(0, decisions*len(samples), decisions), baseline_mean, color="green", label = "vanilla solver")
     plt.fill_between(range(0, decisions*len(samples), decisions), baseline_mean-baseline_conf, baseline_mean+baseline_conf, color='green', alpha=0.2)
 
     # plt.plot(range(0, decisions*len(samples), decisions), samples, color="blue", label = "starting with model scores" if  i == 0 else "")

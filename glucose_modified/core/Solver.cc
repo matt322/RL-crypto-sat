@@ -2199,6 +2199,7 @@ void Solver::waitForActivityScores(double &var_inc_copy, vec<double> &activity_c
     printf("m activity start\n");                                                                               //in the latter it is changed with variable bump disabled, the activity vector is copied, and the activity and increment are restored after n decisions.
     fflush(stdout);
     std::string line;
+    bool changed_activity = false;
     while (getline(std::cin, line)) {
         if (line.empty()) continue;
         if (line == "m activity done") break;
@@ -2229,11 +2230,15 @@ void Solver::waitForActivityScores(double &var_inc_copy, vec<double> &activity_c
             throw std::runtime_error("Invalid index in activity scores: " + std::to_string(idx) + " (size: " + std::to_string(activity.size()) + ")");
         }
         activity[idx] = val;
+        changed_activity = true;
     }
     
-    rebuildOrderHeap();
-    var_inc_copy = var_inc;
-    var_inc = use_static_scores ? 0 : 1;
+    if (changed_activity) {
+        rebuildOrderHeap();
+        var_inc_copy = var_inc;
+        var_inc = use_static_scores ? 0 : 1;
+    }
+    
 
     while (getline(std::cin, line)) {
         if (line.empty()) continue;
