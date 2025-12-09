@@ -97,9 +97,8 @@ class OpenAIESOptimizer:
         return SolverEnv(rounds=21, decisions_per_callback=10000, free_outputs=0, simplify_graph=True, single_inst=False, verb=0, normalize_actions = False)
 
     def rank_transform(self, fitness):
-        order = fitness.argsort()
-        ranks = torch.zeros_like(order, device=fitness.device, dtype=fitness.dtype)
-        ranks[order] = torch.max(torch.tensor(0), (torch.linspace(-1, 1, len(fitness))))
+        ranks = torch.zeros_like(fitness)
+        ranks[fitness.argsort()] = torch.linspace(-1, 1, len(fitness))
         return ranks
     
     def get_grad_est(self):
@@ -127,7 +126,7 @@ class OpenAIESOptimizer:
         fitness = torch.tensor(fitness) 
 
         if self.use_rank_transform:
-            fit_norm = self.rank_transform(fitness)
+            fit_norm = -self.rank_transform(fitness)
         else:
             fit_norm = -(fitness - fitness.mean()) / (fitness.std() + 1e-8) #negating here since using adam
         

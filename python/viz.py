@@ -128,41 +128,77 @@ def mean_and_conf(trajectories, confidence = 0.95):
         cres.append(z * np.std(i, ddof=1) / np.sqrt(len(i)))
     return np.array(mres), np.array(cres)
 
-def decision_efficiency(llrs, period=50000):
+def mean_and_std(trajectories):
+    maxlen = max(map(lambda x: len(x), trajectories))
+    data = [[x for x in t if x is not None] for t in zip(*map(lambda x: x + [None] * (maxlen - len(x)), trajectories))]
+    mres, cres = [], []
+    for i in data:
+        mres.append(np.mean(i))
+        cres.append(np.std(i, ddof=1) if len(i) > 1 else 0.0)
+    return np.array(mres), np.array(cres)
+
+def decision_efficiency(llrs, period=50000, title="Decision Efficiency", file=None):
     maxlen = max([len(i) for i in llrs])
-    meanplot, conf = mean_and_conf(llrs)
-    plt.plot(range(0, period*maxlen, period), meanplot, color="green", label = "mean llr")
-    plt.fill_between(range(0, period*maxlen, period), meanplot-conf, meanplot+conf, color='green', alpha=0.2)
-    for i in llrs:
-        plt.axvline(x=len(i)*period, color='red', linestyle='-', alpha=0.5)
-    plt.show()
+    meanplot, std = mean_and_std(llrs)
+    ax = plt.gca()
+    times = range(0, period*maxlen, period)
+    plt.plot(times, meanplot, color="green", label = "mean llr")
+    plt.fill_between(times, meanplot-std, meanplot+std, color='green', alpha=0.2, label="std")
+    total = len(llrs)
+    unsolved_pct = [100.0 * sum(1 for traj in llrs if len(traj) > i) / total for i in range(maxlen)]
+
+    # secondary axis for percentage unsolved
+    ax2 = ax.twinx()
+    ax2.plot(times, unsolved_pct, color='tab:blue', label='% unsolved', linewidth=2)
+    ax2.set_ylabel('% Instances Unsolved')
+    ax2.set_ylim(0, 100)
+    ax2.tick_params(axis='y')
+
+    # style primary axis (mean LLR)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel('Decisions')
+    ax.set_ylabel('Mean LLR')
+    ax.tick_params(axis='y')
+
+    ax.legend(loc='upper left')
+    ax2.legend(loc='upper right')
+    plt.title(title)
+    plt.grid(True)
+    if file:
+        plt.savefig(file)
+    else:
+        plt.show()
+    plt.close()
 
 
 
 if __name__ == "__main__":
-    llrs = extract("logs/vanilla_eval.jsonl", lambda x: True, key="llr")
-    decision_efficiency(llrs, period=50000)
+    llrs = list(map(lambda x: x[:-1], extract("logs/noadapt_vanilla_eval.jsonl", lambda x: True, key="llr")))
+    llrs_refocused = list(map(lambda x: x[:-1], extract("logs/noadapt_refocus_eval_static_a=2.jsonl", lambda x: True, key="llr")))
+    decision_efficiency(llrs, 50000, "No adaptation Vanilla Solver, 100 instances", file="vanilla_dec_eff.png")
+    decision_efficiency(llrs_refocused, 50000, "No adaptation Periodic Refocusing, 100 instances", file="refocus_dec_eff.png")
+    #exit()
     # vals = np.array(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze() 
     # #var_viz("cnf/sha1_21round.cnf", vals, title="")
 
     # rewards = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="cumulative_reward"))
     # stepcounts = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="steps"))
-    # fitness = np.array(extract("logs/static_noadvance_alpha=0_5/log.jsonl", lambda x: True, key="return_mean"))
+    # fitness = np.array(extract("logs/test_pop512s=0.05_ranktrans_1/log.jsonl", lambda x: True, key="return_mean"))
     # fitness = EMA(fitness)
     # plt.plot(fitness)
     # plt.xlabel("Step")
     # plt.ylabel("Mean Fitness")
     # plt.title("Evolution strategies mean reward over time")
     # plt.show()
-
+    # exit()
     # plt.plot(rewards/stepcounts)
     # plt.xlabel("Episode")
     # plt.ylabel("Average Reward per Step")
     # plt.title("PPO Branching Heuristic Average Reward per Step")
     # plt.show()
 
-    es_times = extract("logs/refocus_eval_static_a=2.jsonl", lambda x: True)
-    vanilla_times = extract("logs/vanilla_eval.jsonl", lambda x: True)
+    es_times = extract("logs/noadapt_refocus_eval_static_a=2.jsonl", lambda x: True)
+    vanilla_times = extract("logs/noadapt_vanilla_eval.jsonl", lambda x: True)
 
     cumulative_plot([
         ("Vanilla Solver", vanilla_times, 200),

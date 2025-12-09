@@ -76,7 +76,7 @@ def mean_and_conf(trajectories, confidence = 0.95):
 
 
 if __name__ == "__main__":
-    decisions = 10000
+    decisions = 50000
     env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=0)
     hybrid_env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=2, heuristic_type="hybrid", hybrid_period=4000)
     gnn_config = get_gnn_config(static=True, nlits=env.nvars * 2, embed_dim=4)

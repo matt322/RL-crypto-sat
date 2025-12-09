@@ -22,7 +22,9 @@ class SolverEnv(gym.Env):
                  reward_pow = 2.0, #2 = (cumulative) Neuroglue reward, 0 = local learning rate
                  heuristic_type = "refocus",
                  hybrid_period = 0,
-                 logfile="logs/episode_log.jsonl"):
+                 logfile="logs/episode_log.jsonl",
+                 solverargs = ["-no-adapt", "-luby", "-var-decay=0.999", "-max-var-decay=0.999"] #"adjust for low sucessive conflicts"
+                 ):
         super().__init__()
         self.free_outputs = free_outputs
         self.decisions_per_callback = decisions_per_callback
@@ -36,6 +38,7 @@ class SolverEnv(gym.Env):
         self.reward_pow = reward_pow
         self.heuristic_type = heuristic_type
         self.hybrid_period = hybrid_period
+        self.solverargs = solverargs
         self.cnf = cnf
         if self.cnf is None:
             self.sha1_instance = Instance(rounds=rounds)
@@ -95,7 +98,8 @@ class SolverEnv(gym.Env):
             timeout_secs=200, 
             verb=self.verb - 2,
             simplify_clauses=self.simplify_graph,
-            reward_pow=self.reward_pow
+            reward_pow=self.reward_pow,
+            args=self.solverargs
         )
         if obs is None:
             print(reward, model)

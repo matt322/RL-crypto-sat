@@ -56,7 +56,20 @@ def fitness_fn(env, model, params, seed, step_forward):
         return 0.01
     return reward
 
-def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, static, decision_period, simplify_graph, n_workers, pretrained_model=None):
+def run_experiment(title, 
+                   steps, 
+                   reward_pow, 
+                   step_forward, 
+                   embed_dim, 
+                   static, 
+                   decision_period, 
+                   simplify_graph, 
+                   n_workers, 
+                   pretrained_model=None, 
+                   popsize=512,
+                   sigma=0.1, 
+                   lr=0.001, 
+                   use_rank_transform=False):
     r"""
     Runs Evolution Strategies experiment
     
@@ -119,10 +132,11 @@ def run_experiment(title, steps, popsize, reward_pow, step_forward, embed_dim, s
         make_env_args=_make_env_config, 
         fitness_fn=fitness_fn, 
         fitness_args=_fitness_fn_config, 
-        sigma=0.05, 
-        lr=0.001, 
+        sigma=sigma, 
+        lr=lr, 
         popsize=popsize, 
-        n_workers=n_workers
+        n_workers=n_workers,
+        use_rank_transform=use_rank_transform
     )
 
     info = {}
@@ -155,18 +169,47 @@ if __name__ == "__main__":
     n_workers = 64
 
     run_experiment(
-        title="static_noadvance_alpha=0_longperiod",
-        steps=2000,
-        popsize=256,
+        title="test_pop512s=0.03_off",
+        steps=200,
         reward_pow=0,
-        step_forward=0,
+        step_forward=1000000,
+        embed_dim=4,
+        static=False,
+        decision_period=50000,
+        simplify_graph=True,
+        n_workers=n_workers,
+        popsize=512,
+        sigma=0.03,
+        use_rank_transform=True,
+    )
+    run_experiment(
+        title="test_static_off",
+        steps=400,
+        reward_pow=0,
+        step_forward=1000000,
         embed_dim=4,
         static=True,
         decision_period=50000,
         simplify_graph=True,
         n_workers=n_workers,
-        pretrained_model="logs/es_logs/static_noadvance_alpha=0_5/model.pt"
+        popsize=256,
+        sigma=0.03,
+        use_rank_transform=False,
     )
+    # run_experiment(
+    #     title="test_pop512s=0.05",
+    #     steps=300,
+    #     reward_pow=0,
+    #     step_forward=0,
+    #     embed_dim=4,
+    #     static=False,
+    #     decision_period=10000,
+    #     simplify_graph=True,
+    #     n_workers=n_workers,
+    #     popsize=512,
+    #     sigma=0.05,
+    #     use_rank_transform=False,
+    # )
 
     # run_experiment(
     #     title="gnn_embed_advance_alpha=0",

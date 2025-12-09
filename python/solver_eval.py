@@ -25,7 +25,7 @@ def run_test(seed, model = None, timeout=200, heuristic="vanilla", decision_peri
                 modelcall = lambda x: model #assume static model
 
         solver = SolverController()
-        obs, _, done, _, _, time = solver.start(cnf, decision_period, timeout_secs=timeout, verb=0, reward_pow=0)
+        obs, _, done, _, _, time = solver.start(cnf, decision_period, timeout_secs=timeout, verb=0, reward_pow=0, args=["-no-adapt", "-luby", "-var-decay=0.999", "-max-var-decay=0.999"])
         iters = 0
         llr_list = []
         while not solver.is_finished():
@@ -52,7 +52,7 @@ def run_tests(n_workers, num_datapoints, logfile, model = None, timeout=200, heu
 
 if __name__ == "__main__":
     static_scores_a2 = np.array(json.load(open("logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze()
-    #run_tests(16, 32, "logs/test_vanilla_eval.jsonl", model=None, timeout=200, heuristic="vanilla", decision_period=50000, hybrid_period=0)
-    run_tests(16, 100, "logs/refocus_eval_static_a=2.jsonl", model=static_scores_a2, timeout=200, heuristic="refocus", decision_period=50000, hybrid_period=0)
+    run_tests(16, 100, "logs/noadapt_vanilla_eval.jsonl", model=None, timeout=200, heuristic="vanilla", decision_period=50000, hybrid_period=0)
+    run_tests(16, 100, "logs/noadapt_refocus_eval_static_a=2.jsonl", model=static_scores_a2, timeout=200, heuristic="refocus", decision_period=50000, hybrid_period=0)
     
    

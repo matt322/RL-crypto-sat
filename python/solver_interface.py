@@ -276,11 +276,13 @@ if __name__ == "__main__":
 
     inst = Instance(rounds=21)
     solver = SolverController()
-    cnf = inst.generate(seed=41)
+    cnf = inst.generate(seed=105, guarantee_soln=True)
     yappi.clear_stats()
     yappi.set_clock_type("wall")
     yappi.start()
-    solver.start(cnf, 500000, timeout_secs=40, verb=0, simplify_clauses=True, reward_pow=0)
+    solver.start(cnf, 100000, timeout_secs=40, verb=0, simplify_clauses=True, reward_pow=0, 
+                 args=["-no-adapt", "-luby", "-var-decay=0.999", "-max-var-decay=0.999"]
+                 )
     yappi.stop()
     yappi.get_func_stats().print_all()
     timetot = 0

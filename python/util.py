@@ -151,6 +151,15 @@ class ObjectVecEnv(DummyVecEnv):
         return self.buf_obs[0], np.array(rews), np.array(dones), list(infos)
 
 
+class Static(nn.Module):
+    def __init__(self, nvars):
+        super().__init__()
+        self.scores = nn.Parameter(torch.randn(nvars))
+
+    def forward(self, x):
+        return self.scores.unsqueeze(0), 0
+
+
 class GNNWrapper(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -158,7 +167,11 @@ class GNNWrapper(nn.Module):
         self.censor = config.pop("censor")
         nlits = None
         self.discrete = config.pop("discrete", False)
-        if e:
+        self.static = config.pop("static", False)
+        if self.static:
+            self.gnn = Static(nlits=config["nlits"] // 2)
+            nlits = config["nlits"]
+        elif e:
             self.gnn = GNNwithEmbeddings(**config)
             nlits = config["nlits"]
         else:
