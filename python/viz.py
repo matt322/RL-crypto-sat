@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import json
 import numpy as np
 from scipy.stats import t
+import os
 
 def extract(file, condition, key="time"):
     res = []
@@ -173,24 +174,29 @@ def decision_efficiency(llrs, period=50000, title="Decision Efficiency", file=No
 
 
 if __name__ == "__main__":
-    llrs = list(map(lambda x: x[:-1], extract("logs/noadapt_vanilla_eval.jsonl", lambda x: True, key="llr")))
-    llrs_refocused = list(map(lambda x: x[:-1], extract("logs/noadapt_refocus_eval_static_a=2.jsonl", lambda x: True, key="llr")))
-    decision_efficiency(llrs, 50000, "No adaptation Vanilla Solver, 100 instances", file="vanilla_dec_eff.png")
-    decision_efficiency(llrs_refocused, 50000, "No adaptation Periodic Refocusing, 100 instances", file="refocus_dec_eff.png")
-    #exit()
+    llrs = list(map(lambda x: x[:-1], extract("logs/eval_static_noadvance_a=0_refocus200k.jsonl", lambda x: "llr" in x, key="llr")))
+    #llrs_refocused = list(map(lambda x: x[:-1], extract("logs/noadapt_refocus_eval_static_a=2.jsonl", lambda x: True, key="llr")))
+    decision_efficiency(llrs, 200000, "Static scores, refocusing, 100 instances", file="static_dec_eff2.png")
+    #decision_efficiency(llrs_refocused, 50000, "No adaptation Periodic Refocusing, 100 instances", file="refocus_dec_eff.png")
+    exit()
     # vals = np.array(json.load(open("logs/logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze() 
     # #var_viz("cnf/sha1_21round.cnf", vals, title="")
 
     # rewards = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="cumulative_reward"))
     # stepcounts = np.array(extract("logs/logs/ppo_log_branching_test_withemb.jsonl", lambda x: True, key="steps"))
-    # fitness = np.array(extract("logs/test_pop512s=0.05_ranktrans_1/log.jsonl", lambda x: True, key="return_mean"))
-    # fitness = EMA(fitness)
-    # plt.plot(fitness)
-    # plt.xlabel("Step")
-    # plt.ylabel("Mean Fitness")
-    # plt.title("Evolution strategies mean reward over time")
-    # plt.show()
-    # exit()
+    logdirs = os.listdir("logs/")    
+    print(logdirs)
+
+    logdirs = list(filter(lambda x: x.startswith("embed") and "9" not in x and "pop" not in x, logdirs))
+    fitness = [(EMA(np.array(extract(f"logs/{i}/log.jsonl", lambda x: True, key="return_mean")), d=0.99), i) for i in logdirs]
+    for v, i in fitness:
+        plt.plot(v, label=i)
+    plt.xlabel("Step")
+    plt.legend()
+    plt.ylabel("Mean Fitness")
+    plt.title("Evolution strategies mean reward over time")
+    plt.show()
+    exit()
     # plt.plot(rewards/stepcounts)
     # plt.xlabel("Episode")
     # plt.ylabel("Average Reward per Step")

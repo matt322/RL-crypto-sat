@@ -2,9 +2,9 @@ from solver_interface import SolverController
 from util import GNNWrapper, get_gnn_config
 from instance_generation import Instance
 import multiprocessing as mp
-import numpy as np
 import torch
 import json
+import os
 
 _worker_instance = None
 
@@ -51,8 +51,65 @@ def run_tests(n_workers, num_datapoints, logfile, model = None, timeout=200, heu
     pool.join()
 
 if __name__ == "__main__":
-    static_scores_a2 = np.array(json.load(open("logs/es_logs/1/es_model_0.jsonl"))["model"]).squeeze()
-    run_tests(16, 100, "logs/noadapt_vanilla_eval.jsonl", model=None, timeout=200, heuristic="vanilla", decision_period=50000, hybrid_period=0)
-    run_tests(16, 100, "logs/noadapt_refocus_eval_static_a=2.jsonl", model=static_scores_a2, timeout=200, heuristic="refocus", decision_period=50000, hybrid_period=0)
+    LOGSPATH = "logs/es_logs/"
+    params = [
+        [   
+            {"title":"eval_static_noadvance_a=0_refocus200k",
+            "num_datapoints":100,
+            "n_workers":16,
+            "timeout":300,
+            "heuristic":"refocus",
+            "decision_period":200000,
+            "hybrid_period":0},
+            {"static":True, "embed_dim":0, "nlits":3968 * 2, "model_path":f"{LOGSPATH}static_noadvance_alpha=0_9/model.pt"}
+        ],
+        [   
+            {"title":"eval_gnn_embed_advance_a=0_refocus200k",
+            "num_datapoints":100,
+            "n_workers":16,
+            "timeout":300,
+            "heuristic":"refocus",
+            "decision_period":200000,
+            "hybrid_period":0},
+            {"static":False, "embed_dim":4, "nlits":3968 * 2, "model_path":f"{LOGSPATH}embed_advance_alpha=0_1/model.pt"}
+        ],
+        [   
+            {"title":"eval_static_noadvance_a=0_refocus50k",
+            "num_datapoints":100,
+            "n_workers":16,
+            "timeout":300,
+            "heuristic":"refocus",
+            "decision_period":50000,
+            "hybrid_period":0},
+            {"static":True, "embed_dim":0, "nlits":3968 * 2, "model_path":f"{LOGSPATH}static_noadvance_alpha=0_9/model.pt"}
+        ],
+        [   
+            {"title":"eval_gnn_embed_advance_a=0_refocus50k",
+            "num_datapoints":100,
+            "n_workers":16,
+            "timeout":300,
+            "heuristic":"refocus",
+            "decision_period":50000,
+            "hybrid_period":0},
+            {"static":False, "embed_dim":4, "nlits":3968 * 2, "model_path":f"{LOGSPATH}embed_advance_alpha=0_1/model.pt"}
+        ]
+        
+    ]
+
+    id = os.getenv("SLURM_ARRAY_TASK_ID")
+   
+    if id is not None:
+        id = int(id)
+        p = params[id]
+        p[0]["logfile"] = f"logs/{p[0]['title']}.jsonl"
+        with open(p[0]["logfile"], 'a') as f:
+            f.write(json.dumps(p[0] | p[1]) + '\n')
+        print(f"Running experiment {id}: {p[0]['title']}")
+        model_path = p[1].pop("model_path")
+        p[0].pop("title")
+        cfg = get_gnn_config(**p[1])
+        model = GNNWrapper(cfg)
+        model.load_state_dict(torch.load(model_path))
+        run_tests(model = model, **p[0])
     
    

@@ -67,7 +67,7 @@ def run_experiment(title,
                    n_workers, 
                    pretrained_model=None, 
                    popsize=512,
-                   sigma=0.1, 
+                   sigma=0.01, 
                    lr=0.001, 
                    use_rank_transform=False):
     r"""
@@ -166,36 +166,89 @@ def run_experiment(title,
 
 
 if __name__ == "__main__":
-    n_workers = 64
+    n_workers = 128
+    params = [
+        {
+        "title":"embed_advance_alpha=0",
+        "steps":4000,
+        "reward_pow":0,
+        "step_forward":100000,
+        "embed_dim":4,
+        "static":False,
+        "decision_period":20000,
+        "simplify_graph":True,
+        "n_workers":n_workers,
+        "popsize":512,
+        "sigma":0.01,
+        "use_rank_transform":False,
+        },
+        {
+        "title":"noembed_noadvance_alpha=0",
+        "steps":4000,
+        "reward_pow":0,
+        "step_forward":0,
+        "embed_dim":0,
+        "static":False,
+        "decision_period":20000,
+        "simplify_graph":True,
+        "n_workers":n_workers,
+        "popsize":512,
+        "sigma":0.01,
+        "use_rank_transform":False,
+        },
+         {
+        "title":"static_noadvance_alpha=0",
+        "steps":4000,
+        "reward_pow":0,
+        "step_forward":0,
+        "embed_dim":0,
+        "static":True,
+        "decision_period":20000,
+        "simplify_graph":True,
+        "n_workers":n_workers,
+        "popsize":512,
+        "sigma":0.01,
+        "use_rank_transform":False,
+        },
 
-    run_experiment(
-        title="test_pop512s=0.03_off",
-        steps=200,
-        reward_pow=0,
-        step_forward=1000000,
-        embed_dim=4,
-        static=False,
-        decision_period=50000,
-        simplify_graph=True,
-        n_workers=n_workers,
-        popsize=512,
-        sigma=0.03,
-        use_rank_transform=True,
-    )
-    run_experiment(
-        title="test_static_off",
-        steps=400,
-        reward_pow=0,
-        step_forward=1000000,
-        embed_dim=4,
-        static=True,
-        decision_period=50000,
-        simplify_graph=True,
-        n_workers=n_workers,
-        popsize=256,
-        sigma=0.03,
-        use_rank_transform=False,
-    )
+    ]
+
+    id = os.getenv("SLURM_ARRAY_TASK_ID")
+    if id is not None:
+        id = int(id)
+        p = params[id]
+        print(f"Running experiment {id}: {p['title']}")
+        run_experiment(**p)
+
+
+    # run_experiment(
+    #     title="test_pop512s=0.03_off",
+    #     steps=200,
+    #     reward_pow=0,
+    #     step_forward=1000000,
+    #     embed_dim=4,
+    #     static=False,
+    #     decision_period=50000,
+    #     simplify_graph=True,
+    #     n_workers=n_workers,
+    #     popsize=512,
+    #     sigma=0.03,
+    #     use_rank_transform=True,
+    # )
+    # run_experiment(
+    #     title="test_static_off",
+    #     steps=400,
+    #     reward_pow=0,
+    #     step_forward=1000000,
+    #     embed_dim=4,
+    #     static=True,
+    #     decision_period=50000,
+    #     simplify_graph=True,
+    #     n_workers=n_workers,
+    #     popsize=256,
+    #     sigma=0.03,
+    #     use_rank_transform=False,
+    # )
     # run_experiment(
     #     title="test_pop512s=0.05",
     #     steps=300,

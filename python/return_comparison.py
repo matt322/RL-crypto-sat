@@ -76,13 +76,13 @@ def mean_and_conf(trajectories, confidence = 0.95):
 
 
 if __name__ == "__main__":
-    decisions = 50000
+    decisions = 20000
     env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=0)
     hybrid_env = SolverEnv(simplify_graph=True, decisions_per_callback=decisions, filter_scores=True, normalize_actions=False, reward_pow=2, heuristic_type="hybrid", hybrid_period=4000)
     gnn_config = get_gnn_config(static=True, nlits=env.nvars * 2, embed_dim=4)
     
     model = GNNWrapper(gnn_config)
-    model.load_state_dict(torch.load("logs/static_noadvance_alpha=0_6/model.pt"))
+    model.load_state_dict(torch.load("logs/static_noadvance_alpha=0_9/model.pt"))
     obs, _ = env.reset()
     model_all = model.forward_direct_on_obs(obs)
 
@@ -100,7 +100,7 @@ if __name__ == "__main__":
     model_samples_x, model_samples_y = [], []
     for i in range(10):
         print("getting model samples")
-        samples = sample_returns_within_period(env, static_scores_a2, nsteps, 1)
+        samples = sample_returns_within_period(env, model, nsteps, 1)
         model_samples_y.append(samples)
         
         print("getting static samples")
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     plt.legend()
     plt.xlabel("Decisions")
     plt.ylabel("Return (a=2)")
-    plt.title("Average return refocusing every 20k decisions, 20 samples")
+    plt.title("Average return refocusing every 50k decisions, 20 samples")
     plt.show()
 
     
